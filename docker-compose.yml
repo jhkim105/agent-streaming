@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # KRaft 모드 Kafka 단일 브로커 (Zookeeper 없이 동작)
+  kafka:
+    container_name: agent-streaming-kafka
+    image: confluentinc/cp-kafka:7.5.3
+    restart: always
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+  # Redis (In-Memory Cache & Pub/Sub Subsystem)
+  redis:
+    container_name: agent-streaming-redis
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 512mb --maxmemory-policy volatile-lru
+
+  # Kafka UI 모니터링 대시보드
+  kafka-ui:
+    container_name: agent-streaming-kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    restart: always
+    ports:
+      - "8989:8080"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: 'true'
+
+  # 프로젝트 전용 토픽 자동 생성 초기화 컨테이너
+  kafka-init:
+    container_name: agent-streaming-kafka-init
+    image: confluentinc/cp-kafka:7.5.3
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Kafka 브로커 준비 대기
+      kafka-topics --bootstrap-server kafka:29092 --list
+
+      echo -e 'Creating agent-streaming kafka topics...'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-requests --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-responses --replication-factor 1 --partitions 3
+      
+      echo -e 'Successfully created topics:'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "

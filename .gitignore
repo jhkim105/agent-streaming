@@ -1,0 +1,75 @@
+# macOS
+.DS_Store
+.apple-desktop
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# IDE & Tools
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.gemini/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node.js & React Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Gradle & Kotlin
+.gradle/
+**/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+**/out/
+**/bin/
+.gradle
+gradle-app.setting
+.gradletasknamecache
+
+# Temporary & Local Scratch
+/tmp/
+scratch/
+*.log
