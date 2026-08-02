@@ -13,6 +13,7 @@
 - [x] **Phase 3: Kotlin Agent Stream Server 개발** `[7/7]`
 - [x] **Phase 4: Frontend Web Application 개발 (Vite+React)** `[6/6]`
 - [x] **Phase 5: E2E 통합 및 분산 세션 라우팅 검증** `[5/5]`
+- [x] **Phase 6: A2UI 선언적 UI 및 양방향 피드백 연동** `[5/5]`
 
 ---
 
@@ -58,3 +59,10 @@
 - [x] Task 5.3: 로컬 다중 포트 (Port 8080, 8081) 기동 스크립트 작성 (`scripts/start-all.sh`)
 - [x] Task 5.4: React FE ↔ 다중 Stream Server ↔ Kafka ↔ Python Agent ↔ Redis E2E 검증 통과
 - [x] Task 5.5: 첫 단어 응답시간(TTFT) 프로파일링 및 튜닝 (1.2초 달성)
+
+### [Phase 6: A2UI 선언적 UI 및 양방향 피드백 연동](phase6-a2ui-integration.md)
+- [x] Task 6.1: A2UI 이벤트 데이터 스키마 및 REST API 명세 확장 (`3.spec.md`)
+- [x] Task 6.2: Kotlin Stream Server 내 `POST /api/chat/action` 및 Kafka 프로듀싱 연동
+- [x] Task 6.3: Python Worker 내 `a2ui_schema.py` Pydantic 빌더 및 `a2ui_generation` 노드 개발
+- [x] Task 6.4: React FE 내 `A2UIRenderer.tsx` 대시보드 컴포넌트 및 `sendUserAction` 피드백 구현
+- [x] Task 6.5: `v1.0.0-base` Git Tagging 및 `feature/a2ui-integration` 브랜치 E2E 검증 완료

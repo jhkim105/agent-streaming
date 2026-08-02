@@ -22,9 +22,16 @@ def handle_agent_request(request_data: Dict[str, Any]) -> None:
     session_id = request_data.get("sessionId", "")
     host_id = request_data.get("hostId", "")
     query = request_data.get("query", "")
+    action_id = request_data.get("actionId", "")
+    payload = request_data.get("payload", {})
+
+    # A2UI 사용자 버튼 클릭 액션인 경우 쿼리를 변환합니다.
+    if action_id:
+        selected_label = payload.get("label", action_id)
+        query = f"A2UI 후속 분석 요청: {selected_label}"
 
     print(f"\n[AgentWorker] 🚀 새로운 리서치 요청 수신! (Session: {session_id}, Host: {host_id})")
-    print(f"[AgentWorker] ❓ 질문 내용: '{query}'")
+    print(f"[AgentWorker] ❓ 질문/액션 내용: '{query}'")
 
     # 세션 ID나 질문이 누락된 유효하지 않은 요청인 경우 예외 로그 출력 후 스킵합니다.
     if not session_id or not query:

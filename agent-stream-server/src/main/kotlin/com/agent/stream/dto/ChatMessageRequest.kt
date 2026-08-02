@@ -10,3 +10,9 @@ data class ChatMessageResponse(
     val message: String = "Research task queued successfully",
     val sessionId: String
 )
+
+data class AgentActionRequest(
+    val sessionId: String,
+    val actionId: String,
+    val payload: Map<String, Any> = emptyMap()
+)

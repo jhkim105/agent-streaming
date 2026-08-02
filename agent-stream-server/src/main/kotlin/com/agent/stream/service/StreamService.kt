@@ -38,6 +38,23 @@ class StreamService(
     }
 
     /**
+     * 사용자의 A2UI 액션을 Host ID 및 Session ID와 함께 카프카 요청 토픽으로 전송합니다.
+     */
+    fun sendUserAction(sessionId: String, actionId: String, payload: Map<String, Any>) {
+        val messagePayload = mapOf(
+            "sessionId" to sessionId,
+            "hostId" to hostId,
+            "query" to "A2UI_ACTION:$actionId",
+            "actionId" to actionId,
+            "payload" to payload
+        )
+        val jsonPayload = objectMapper.writeValueAsString(messagePayload)
+
+        logger.info { "Kafka A2UI Action 전송 ($topicRequests): sessionId=$sessionId, actionId=$actionId" }
+        kafkaTemplate.send(topicRequests, sessionId, jsonPayload)
+    }
+
+    /**
      * Kafka 수신 메시지를 처리하며, Host ID를 검증하여 본인 노드면 직접 중계하고 타 노드면 Redis Pub/Sub으로 릴레이합니다.
      */
     fun handleAgentResponse(event: AgentResponseEvent) {

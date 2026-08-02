@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { AgentEvent, ConnectionStatus, StatusLog } from '../types/agent';
+import type { AgentEvent, ConnectionStatus, StatusLog, A2UIData } from '../types/agent';
 
 const STREAM_URL = '/api/chat/stream';
 const MESSAGE_URL = '/api/chat/message';
+const ACTION_URL = '/api/chat/action';
 
 export function useAgentStream() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('DISCONNECTED');
   const [statusLogs, setStatusLogs] = useState<StatusLog[]>([]);
   const [reportMarkdown, setReportMarkdown] = useState<string>('');
+  const [a2uiData, setA2uiData] = useState<A2UIData | null>(null);
   const [isResearching, setIsResearching] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -66,13 +68,25 @@ export function useAgentStream() {
       }
     });
 
-    // 4. DONE 이벤트 (리서치 완성)
+    // 4. A2UI_RENDER 이벤트 (선언적 A2UI 대시보드 구조 수신)
+    es.addEventListener('A2UI_RENDER', (event) => {
+      try {
+        const data: AgentEvent = JSON.parse(event.data);
+        const parsedA2UI: A2UIData = JSON.parse(data.content);
+        setA2uiData(parsedA2UI);
+        console.log('[SSE A2UI_RENDER] A2UI Dashboard Schema Received:', parsedA2UI);
+      } catch (err) {
+        console.error('[SSE A2UI_RENDER ERROR]', err);
+      }
+    });
+
+    // 5. DONE 이벤트 (리서치 완성)
     es.addEventListener('DONE', () => {
       setIsResearching(false);
       console.log('[SSE DONE] Research report stream completed');
     });
 
-    // 5. ERROR 이벤트 (에러 발생)
+    // 6. ERROR 이벤트 (에러 발생)
     es.addEventListener('ERROR', (event: MessageEvent) => {
       try {
         if (event.data) {
@@ -114,6 +128,7 @@ export function useAgentStream() {
     // 초기화
     setStatusLogs([]);
     setReportMarkdown('');
+    setA2uiData(null);
     setErrorMsg(null);
     setIsResearching(true);
 
@@ -139,14 +154,49 @@ export function useAgentStream() {
     }
   };
 
+  // 사용자 A2UI 액션 버튼 클릭 전송 함수 (POST /api/chat/action)
+  const sendUserAction = async (actionId: string, payload: Record<string, any>) => {
+    if (!sessionId) {
+      setErrorMsg('SSE 세션이 연결되어 있지 않습니다.');
+      return;
+    }
+
+    setIsResearching(true);
+    setErrorMsg(null);
+
+    try {
+      const response = await fetch(ACTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sessionId,
+          actionId,
+          payload
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+    } catch (err: any) {
+      console.error('[Send User Action Error]', err);
+      setErrorMsg(`UI 액션 전송 실패: ${err.message}`);
+      setIsResearching(false);
+    }
+  };
+
   return {
     sessionId,
     connectionStatus,
     statusLogs,
     reportMarkdown,
+    a2uiData,
     isResearching,
     errorMsg,
     submitQuery,
+    sendUserAction,
     reconnect: connectSSE
   };
 }
