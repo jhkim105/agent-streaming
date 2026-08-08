@@ -1,5 +1,6 @@
 package com.agent.stream.controller
 
+import com.agent.stream.dto.AgentActionRequest
 import com.agent.stream.dto.ChatMessageRequest
 import com.agent.stream.dto.ChatMessageResponse
 import com.agent.stream.service.StreamService
@@ -60,6 +61,20 @@ class ChatController(
         val response = ChatMessageResponse(
             status = "ACCEPTED",
             message = "Research task queued successfully",
+            sessionId = request.sessionId
+        )
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response)
+    }
+
+    @PostMapping("/action")
+    fun postAction(@RequestBody request: AgentActionRequest): ResponseEntity<ChatMessageResponse> {
+        logger.info { "A2UI 액션 수신: sessionId=${request.sessionId}, actionId='${request.actionId}'" }
+
+        streamService.sendUserAction(request.sessionId, request.actionId, request.payload)
+
+        val response = ChatMessageResponse(
+            status = "ACCEPTED",
+            message = "Action queued successfully",
             sessionId = request.sessionId
         )
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response)

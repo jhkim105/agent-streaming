@@ -114,7 +114,21 @@ agent-streaming/
 
 ## 🚀 4. 빠른 실행 가이드 (Quick Start)
 
-### Step 1: 인프라 실행 (Kafka & Redis)
+### Option A: 원터치 통합 실행 (추천 ⚡)
+모든 인프라(Docker Kafka/Redis), Python Worker, Kotlin Gateway, React SPA를 원클릭으로 일괄 기동하고 관리합니다.
+```bash
+# 프로젝트 루트에서 통합 실행 스크립트 구동
+./start.sh
+
+# 웹 앱 접속: http://localhost:5173
+# (종료 시 터미널에서 Ctrl+C를 누르면 모든 관련 프로세스가 자동 정지됩니다)
+```
+
+---
+
+### Option B: 서비스별 수동 개별 실행
+
+#### Step 1: 인프라 실행 (Kafka & Redis)
 로컬 인프라는 KRaft 기반 Kafka와 Redis를 구동합니다.
 ```bash
 # Docker Compose로 인프라 서비스 일괄 기동

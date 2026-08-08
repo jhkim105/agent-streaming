@@ -2,6 +2,7 @@ import { useAgentStream } from './hooks/useAgentStream';
 import { ChatInput } from './components/ChatInput';
 import { ChatTimeline } from './components/ChatTimeline';
 import { ReportViewer } from './components/ReportViewer';
+import { A2UIRenderer } from './components/A2UIRenderer';
 import { Bot, AlertTriangle, RefreshCw } from 'lucide-react';
 import './App.css';
 
@@ -11,9 +12,11 @@ export function App() {
     connectionStatus,
     statusLogs,
     reportMarkdown,
+    a2uiData,
     isResearching,
     errorMsg,
     submitQuery,
+    sendUserAction,
     reconnect
   } = useAgentStream();
 
@@ -67,9 +70,16 @@ export function App() {
           <ChatTimeline logs={statusLogs} isResearching={isResearching} />
         </section>
 
-        {/* Right Column: Markdown Report Stream Viewer */}
-        <section>
+        {/* Right Column: Markdown Report Stream Viewer & A2UI Dashboard */}
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <ReportViewer markdownText={reportMarkdown} isResearching={isResearching} />
+          {a2uiData && (
+            <A2UIRenderer
+              data={a2uiData}
+              onActionSelect={sendUserAction}
+              disabled={isResearching}
+            />
+          )}
         </section>
       </main>
     </div>

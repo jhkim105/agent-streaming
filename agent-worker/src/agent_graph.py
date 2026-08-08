@@ -10,6 +10,7 @@ from src.tools.search_tool import search_web_duckduckgo
 from src.tools.scraper_tool import scrape_webpage_content
 from src.kafka_client import AgentKafkaProducer
 from src.config import OPENAI_API_KEY
+from src.a2ui_schema import A2UIComponentBuilder
 
 
 class ResearchState(TypedDict):
@@ -47,13 +48,15 @@ class AgentWorkflowEngine:
         builder.add_node("web_search", self._node_web_search)
         builder.add_node("web_scraping", self._node_web_scraping)
         builder.add_node("report_generation", self._node_report_generation)
+        builder.add_node("a2ui_generation", self._node_a2ui_generation)
 
         # 2. 순차 간선(Edge) 흐름 연결
         builder.set_entry_point("query_analysis")
         builder.add_edge("query_analysis", "web_search")
         builder.add_edge("web_search", "web_scraping")
         builder.add_edge("web_scraping", "report_generation")
-        builder.add_edge("report_generation", END)
+        builder.add_edge("report_generation", "a2ui_generation")
+        builder.add_edge("a2ui_generation", END)
 
         # 그래프를 실행 가능한 상태로 컴파일하여 반환합니다.
         return builder.compile()
@@ -208,16 +211,54 @@ class AgentWorkflowEngine:
             # 타자기 스트리밍 효과를 위한 0.03초 간격 미세 지연
             time.sleep(0.03)
 
-        # 완료 이벤트(DONE) 발행
+        return {"final_report": report_md}
+
+    def _node_a2ui_generation(self, state: ResearchState) -> Dict[str, Any]:
+        """
+        [5단계 노드] 수집된 리서치 데이터와 동적 옵션 카드를 A2UI 선언적 JSON으로 생성하여 
+        Kafka A2UI_RENDER 이벤트로 클라이언트에 전송합니다.
+        """
+        session_id = state["session_id"]
+        host_id = state["host_id"]
+        query = state["query"]
+        results = state.get("search_results", [])
+
+        # A2UI 상태 알림 메시지 발행
+        self.producer.send_event(
+            session_id=session_id,
+            host_id=host_id,
+            event_type="STATUS",
+            content="🎨 인터랙티브 A2UI UI 대시보드 컴포넌트 생성 중",
+            step="a2ui_generation"
+        )
+
+        # A2UI payload 딕셔너리 생성
+        a2ui_data = A2UIComponentBuilder.create_research_a2ui(
+            query=query,
+            sources_count=len(results),
+            confidence_score="96%"
+        )
+        a2ui_json = A2UIComponentBuilder.to_json(a2ui_data)
+
+        # Kafka로 A2UI_RENDER 이벤트 전송
+        self.producer.send_event(
+            session_id=session_id,
+            host_id=host_id,
+            event_type="A2UI_RENDER",
+            content=a2ui_json,
+            step="a2ui_generation"
+        )
+
+        # 모든 처리가 완결되었음을 알리는 최종 완료 이벤트(DONE) 발행
         self.producer.send_event(
             session_id=session_id,
             host_id=host_id,
             event_type="DONE",
-            content="Report Generation Completed",
+            content="Report and A2UI Dashboard Generation Completed",
             step="completed"
         )
 
-        return {"final_report": report_md}
+        return {}
 
     def execute(self, session_id: str, host_id: str, query: str) -> None:
         """

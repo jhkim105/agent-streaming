@@ -1,0 +1,154 @@
+.a2ui-dashboard {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  animation: fadeInSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.a2ui-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.a2ui-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.a2ui-version-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #ffffff;
+  border-radius: 20px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.a2ui-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.a2ui-metric-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 1rem;
+  border-radius: 12px;
+  transition: all 0.25s ease;
+}
+
+.a2ui-metric-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateY(-2px);
+}
+
+.a2ui-metric-label {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+}
+
+.a2ui-metric-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #38bdf8;
+  margin-bottom: 0.25rem;
+}
+
+.a2ui-metric-change {
+  font-size: 0.75rem;
+  color: #34d399;
+  font-weight: 500;
+}
+
+.a2ui-action-section {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px dashed rgba(99, 102, 241, 0.3);
+  padding: 1.25rem;
+  border-radius: 12px;
+}
+
+.a2ui-action-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.25rem;
+}
+
+.a2ui-action-desc {
+  font-size: 0.825rem;
+  color: #94a3b8;
+  margin-bottom: 1rem;
+}
+
+.a2ui-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.a2ui-option-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.85rem 1.1rem;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 10px;
+  color: #f1f5f9;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.a2ui-option-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%);
+  border-color: #818cf8;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.25);
+  transform: translateX(4px);
+}
+
+.a2ui-option-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.a2ui-option-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.a2ui-option-subtext {
+  font-size: 0.775rem;
+  color: #cbd5e1;
+  margin-top: 0.2rem;
+}
