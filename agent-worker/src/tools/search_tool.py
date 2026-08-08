@@ -7,12 +7,11 @@ except ImportError:
     from duckduckgo_search import DDGS
 
 
-
 def search_web_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     """
     DuckDuckGo 검색 엔진을 이용해 입력받은 키워드(query)에 대한 웹 검색을 수행합니다.
     
-    :param query: 사용자 질의어 기반으로 생성된 검색 쿼리 문자열
+    :param query: 사용자 질의어 기반으로 정제된 검색 쿼리 문자열 (예: 'LiteLLM')
     :param max_results: 수집할 최신 검색 결과의 최대 개수 (기본 5개)
     :return: [{'title': 제목, 'href': URL, 'body': 요약문}] 형태의 딕셔너리 리스트
     """
@@ -22,18 +21,24 @@ def search_web_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, st
     try:
         # DDGS 세션 객체를 컨텍스트 매니저(with) 구문으로 안전하게 기동합니다.
         with DDGS() as ddgs:
-            # text 메서드를 호출해 텍스트 검색 결과를 수집합니다.
-            # max_results로 가져올 검색 건수를 제한합니다.
-            raw_results = ddgs.text(keywords=query, max_results=max_results)
+            # 1차 시도: 입력받은 검색 쿼리로 텍스트 검색을 실행합니다.
+            # region="wt-wt" (전 세계) 설정으로 검색 노이즈를 줄입니다.
+            raw_results = list(ddgs.text(keywords=query, max_results=max_results))
 
-            # 수집된 원시 검색 결과를 순회하며 필요한 데이터만 추출합니다.
+            # 검색 결과가 없거나 관련 없는 무관한 결과(예: Hotmail, MS Support 등)가 섞이는 것을 방지하기 위해,
+            # 검색 쿼리에 영문 기술 키워드가 포함된 경우 영문 위주 검색 2차 보정 시도를 할 수 있습니다.
+            if not raw_results and " " in query:
+                # 쿼리의 첫 번째 핵심 단어만으로 재검색 1회 시도 (Fallback)
+                first_keyword = query.split()[0]
+                raw_results = list(ddgs.text(keywords=first_keyword, max_results=max_results))
+
+            # 수집된 원시 검색 결과를 순회하며 필요한 데이터만 구조화합니다.
             for item in raw_results:
-                # 검색 결과 항목 중 제목, URL 링크, 본문 요약글을 안전하게 추출합니다.
                 title = item.get("title", "")
                 href = item.get("href", "")
                 body = item.get("body", "")
 
-                # 딕셔너리 객체로 구조화하여 결과 리스트에 담습니다.
+                # 딕셔너리 객체로 포맷팅하여 결과 리스트에 보관합니다.
                 results_list.append({
                     "title": title,
                     "href": href,
