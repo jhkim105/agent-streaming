@@ -1,9 +1,9 @@
-# ADR 0002: Redis Streams 버킷팅 및 컨슈머 시점 동적 세션 라우팅 아키텍처 채택
+# ADR 0003: Redis Streams 버킷팅 및 컨슈머 시점 동적 세션 라우팅 아키텍처 채택
 
 * **상태 (Status)**: 승인됨 (Accepted)
 * **날짜 (Date)**: 2026-08-08
 * **작성자 (Author)**: Antigravity Agent & User
-* **관련 문서**: [ADR 0001 세션 라우팅](0001-multi-node-multi-node-routing.md) | [요구사항 정의서](../1.requirements.md) | [시스템 아키텍처](../2.architecture.md)
+* **관련 문서**: [ADR 0001 세션 라우팅](0001-multi-node-session-routing.md) | [ADR 0002 코틀린 SSE](0002-kotlin-sse-coroutine-flow.md) | [요구사항 정의서](../1.requirements.md) | [시스템 아키텍처](../2.architecture.md)
 
 ---
 
@@ -16,7 +16,7 @@
    * 서버 노드 배포/재시작이나 네트워크 미세 끊김이 발생하여 Redis 연결이 재수립되는 짧은 시간 동안 전송된 `CHUNK`나 `STATUS` 토큰 이벤트는 **Redis 채널에서 즉시 유실(Drop)**되는 문제가 존재합니다.
 2. **L4/L7 라운드로빈 로드밸런서 환경에서의 세션 라우팅 실패**:
    * 클라이언트가 `GET /api/chat/stream`으로 **Node 1**에 SSE 소켓을 수립했더라도, `POST /api/chat/message` 질문 요청은 라운드로빈 로드밸런서에 의해 **Node 2**로 들어갈 수 있습니다.
-   * 질문을 받은 Node 2가 질문 제출 시점(Producer)에 자코의 `hostId`(`node-2`)를 박아 Kafka로 송신할 경우, 파이썬 에이전트의 응답이 Node 2로 배달되지만 **실제 사용자 소켓은 Node 1에 맺어져 있어 100% 메시지가 유실**됩니다.
+   * 질문을 받은 Node 2가 질문 제출 시점(Producer)에 자기의 `hostId`(`node-2`)를 박아 Kafka로 송신할 경우, 파이썬 에이전트의 응답이 Node 2로 배달되지만 **실제 사용자 소켓은 Node 1에 맺어져 있어 100% 메시지가 유실**됩니다.
 3. **대동시 접속 환경에서의 Redis 커넥션 폭발 위험 (Connection Explosion)**:
    * 대화방 또는 유저 수에 비례하여 1:1로 Redis Stream Key/Channel을 생성하고 `XREAD` 커넥션을 맺을 경우, 동시 대화 수가 10,000개로 늘어나면 **Redis 커넥션 및 폴링 스레드 수도 10,000개로 폭발**하여 레디스 인프라가 붕괴할 수 있습니다.
 
