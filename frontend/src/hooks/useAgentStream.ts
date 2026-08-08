@@ -7,6 +7,7 @@ const ACTION_URL = '/api/chat/action';
 const CONVERSATIONS_URL = '/api/chat/conversations';
 
 const CONVERSATION_STORAGE_KEY = 'agent_streaming_current_conversation_id';
+const LAST_EVENT_ID_KEY = 'agent_streaming_last_event_id';
 
 export function useAgentStream() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -25,6 +26,7 @@ export function useAgentStream() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
+  const lastEventIdRef = useRef<string | null>(localStorage.getItem(LAST_EVENT_ID_KEY));
 
   // 이전 대화 요약 목록 조회 API 호출 (GET /api/chat/conversations)
   const fetchConversations = useCallback(async () => {
@@ -83,16 +85,21 @@ export function useAgentStream() {
     }
   }, []);
 
-  // SSE 커넥션 수립 함수 (conversationId 전달 시 기존 대화에 재바인딩)
+  // SSE 커넥션 수립 함수 (ADR 0003: conversationId 및 Last-Event-ID 지원)
   const connectSSE = useCallback(() => {
     if (eventSourceRef.current) return;
 
     setConnectionStatus('CONNECTING');
     
-    // conversationId가 있으면 쿼리 파라미터로 전송하여 소켓 이어받기
     const savedConvId = localStorage.getItem(CONVERSATION_STORAGE_KEY);
-    const url = savedConvId 
-      ? `${STREAM_URL}?conversationId=${encodeURIComponent(savedConvId)}`
+    const savedLastEventId = lastEventIdRef.current;
+
+    const queryParams: string[] = [];
+    if (savedConvId) queryParams.push(`conversationId=${encodeURIComponent(savedConvId)}`);
+    if (savedLastEventId) queryParams.push(`lastEventId=${encodeURIComponent(savedLastEventId)}`);
+
+    const url = queryParams.length > 0
+      ? `${STREAM_URL}?${queryParams.join('&')}`
       : STREAM_URL;
 
     const es = new EventSource(url);
@@ -123,6 +130,10 @@ export function useAgentStream() {
     // 2. STATUS 이벤트 (에이전트 추론 단계 로깅)
     es.addEventListener('STATUS', (event) => {
       try {
+        if (event.lastEventId) {
+          lastEventIdRef.current = event.lastEventId;
+          localStorage.setItem(LAST_EVENT_ID_KEY, event.lastEventId);
+        }
         const data: AgentEvent = JSON.parse(event.data);
         const newLog: StatusLog = {
           id: Math.random().toString(36).substring(2, 9),
@@ -136,9 +147,13 @@ export function useAgentStream() {
       }
     });
 
-    // 3. CHUNK 이벤트 (마크다운 타자기 토큰 누적)
+    // 3. CHUNK 이벤트 (마크다운 타자기 토큰 누적 및 W3C Last-Event-ID 기록)
     es.addEventListener('CHUNK', (event) => {
       try {
+        if (event.lastEventId) {
+          lastEventIdRef.current = event.lastEventId;
+          localStorage.setItem(LAST_EVENT_ID_KEY, event.lastEventId);
+        }
         const data: AgentEvent = JSON.parse(event.data);
         setReportMarkdown((prev) => prev + data.content);
       } catch (err) {
@@ -162,7 +177,7 @@ export function useAgentStream() {
     es.addEventListener('DONE', () => {
       setIsResearching(false);
       console.log('[SSE DONE] Research report stream completed');
-      fetchConversations(); // 목록 갱신
+      fetchConversations();
     });
 
     // 6. ERROR 이벤트 (에러 발생)
@@ -178,14 +193,13 @@ export function useAgentStream() {
       setIsResearching(false);
     });
 
-    // Issue #2 핸들링: onerror 시 영구 close가 아닌 백오프 재연결 시도
+    // ADR 0003: onerror 시 지연 재연결 시도 (기존 conversationId 및 lastEventId 보존)
     es.onerror = () => {
       setConnectionStatus('ERROR');
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
-      // 3초 후 자동 지연 재연결 시도 (기존 conversationId 유지)
       if (!reconnectTimeoutRef.current) {
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectTimeoutRef.current = null;
@@ -214,6 +228,8 @@ export function useAgentStream() {
   // 신규 대화 시작 함수
   const startNewConversation = () => {
     localStorage.removeItem(CONVERSATION_STORAGE_KEY);
+    localStorage.removeItem(LAST_EVENT_ID_KEY);
+    lastEventIdRef.current = null;
     setConversationId(null);
     setStatusLogs([]);
     setReportMarkdown('');

@@ -2,7 +2,9 @@ package com.agent.stream.controller
 
 import com.agent.stream.dto.*
 import com.agent.stream.service.ConversationHistoryStore
+import com.agent.stream.service.RedisStreamRoutingService
 import com.agent.stream.service.StreamService
+import com.agent.stream.session.RedisSessionRegistry
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.channels.awaitClose
@@ -22,27 +24,34 @@ private val logger = KotlinLogging.logger {}
 @RequestMapping("/api/chat")
 class ChatController(
     private val sessionRegistry: SessionRegistry,
+    private val redisSessionRegistry: RedisSessionRegistry,
+    private val redisStreamRoutingService: RedisStreamRoutingService,
     private val streamService: StreamService,
     private val conversationHistoryStore: ConversationHistoryStore,
+    private val hostId: String,
     private val objectMapper: ObjectMapper
 ) {
 
     /**
-     * 클라이언트와 SSE 단방향 스트림 연결을 수립합니다. (conversationId 전달 시 이전 대화에 바인딩)
+     * 클라이언트와 SSE 단방향 스트림 연결을 수립합니다. (ADR 0003: Redis 세션 위치 동적 등록 및 Last-Event-ID 수신)
      */
     @GetMapping("/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun streamEvents(
-        @RequestParam(required = false) conversationId: String? = null
+        @RequestParam(required = false) conversationId: String? = null,
+        @RequestHeader(name = "Last-Event-ID", required = false) lastEventId: String? = null
     ): Flow<ServerSentEvent<String>> = callbackFlow {
         val sessionId = UUID.randomUUID().toString()
         val validConversationId = conversationHistoryStore.getOrCreateConversation(conversationId)
 
-        logger.info { "새로운 SSE 연결 수립 요청: sessionId=$sessionId, conversationId=$validConversationId" }
+        logger.info { "새로운 SSE 연결 수립 요청 (ADR 0003): sessionId=$sessionId, conversationId=$validConversationId, lastEventId=$lastEventId, hostId=$hostId" }
 
-        // 로컬 SessionRegistry에 스트리밍 소켓 채널 등록
+        // 1. 로컬 SessionRegistry에 스트리밍 소켓 채널 등록
         sessionRegistry.register(sessionId, this.channel)
 
-        // INIT 이벤트 전달 (sessionId 및 conversationId 함께 반환)
+        // 2. Redis 세션 위치 동적 저장소에 소켓 위치 등록 (session:host:{sessionId} -> localHostId)
+        redisSessionRegistry.registerSessionHost(sessionId, hostId).subscribe()
+
+        // 3. INIT 이벤트 전달 (sessionId 및 conversationId 함께 반환)
         val initPayload = mapOf(
             "type" to "INIT",
             "sessionId" to sessionId,
@@ -56,10 +65,28 @@ class ChatController(
 
         trySend(initEvent)
 
-        // Issue #2 세션 오삭제 방지: 현재 닫히는 채널 객체가 일치할 때만 안전하게 세션 제거
+        // 4. W3C Last-Event-ID 커서 존재 시 끊어진 시점 이후의 미열람 토큰을 Redis Stream에서 복원 릴레이
+        if (lastEventId != null && lastEventId.isNotBlank()) {
+            logger.info { "W3C Last-Event-ID 수신 ➔ 미열람 스트림 복원 진행: lastEventId=$lastEventId" }
+            redisStreamRoutingService.readStreamEventsAfter(lastEventId)
+                .subscribe({ missedEvents ->
+                    missedEvents.forEach { event ->
+                        val replayEvent = ServerSentEvent.builder<String>()
+                            .event(event.type)
+                            .data(objectMapper.writeValueAsString(event))
+                            .build()
+                        trySend(replayEvent)
+                    }
+                }, { err ->
+                    logger.error(err) { "Last-Event-ID 스트림 복원 중 오류 발생: lastEventId=$lastEventId" }
+                })
+        }
+
+        // Issue #2 세션 오삭제 방지 & Redis 세션 위치 제거
         awaitClose {
             logger.info { "SSE 연결 종료 감지 (Client disconnected): sessionId=$sessionId" }
             sessionRegistry.remove(sessionId, this.channel)
+            redisSessionRegistry.removeSessionHost(sessionId).subscribe()
         }
     }
 
