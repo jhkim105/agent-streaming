@@ -21,6 +21,7 @@ class ResearchState(TypedDict):
     LangGraph 흐름 속에서 각 노드 간에 전달되고 공유되는 상태 데이터 클래스입니다.
     """
     session_id: str                      # 사용자 세션 유니크 UUID
+    conversation_id: str                 # 비즈니스 리서치 대화 식별자
     host_id: str                         # 타겟 게이트웨이 인스턴스 ID
     query: str                           # 사용자 질문 원본
     search_query: str                    # 정제된 순수 검색 키워드
@@ -74,12 +75,14 @@ class AgentWorkflowEngine:
         [1단계 노드] 사용자의 질문을 분석하여 카테고리(기술/비즈니스/일반)를 자동 분류하고 pure 검색 키워드를 추출합니다.
         """
         session_id = state["session_id"]
+        conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
 
         # Kafka로 에이전트의 현재 분석 시작 알림을 전송합니다.
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
             content=f"🔍 사용자 질문 의도 및 주제 정밀 분석 중: '{query}'",
@@ -126,6 +129,7 @@ class AgentWorkflowEngine:
         # 분석 완료 이벤트 발송
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
             content=f"📌 [분류 완료] 카테고리: {category.upper()} | 정제된 검색어: '{search_query}'",
@@ -144,11 +148,13 @@ class AgentWorkflowEngine:
         [2단계 노드] 정제된 pure 검색어(예: 'LiteLLM')를 사용해 DuckDuckGo 웹 조회를 실행합니다.
         """
         session_id = state["session_id"]
+        conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         search_query = state.get("search_query", state["query"])
 
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
             content=f"🌐 DuckDuckGo 타깃 실시간 웹 검색 중 (검색어: '{search_query}')",
@@ -159,6 +165,7 @@ class AgentWorkflowEngine:
 
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
             content=f"✅ 실시간 웹 검색 결과 {len(results)}건 수집 완료",
@@ -173,6 +180,7 @@ class AgentWorkflowEngine:
         [3단계 노드] 검색된 URL들의 본문 콘텐츠를 읽어옵니다.
         """
         session_id = state["session_id"]
+        conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         results = state.get("search_results", [])
 
@@ -186,6 +194,7 @@ class AgentWorkflowEngine:
 
             self.producer.send_event(
                 session_id=session_id,
+                conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📄 본문 스크래핑 중 ({idx+1}/{len(results)}): {title[:25]}...",
@@ -206,6 +215,7 @@ class AgentWorkflowEngine:
         LLM이 직접 생성하는 자연어 토큰을 Kafka로 실시간 타자기 스트리밍 송신합니다.
         """
         session_id = state["session_id"]
+        conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
         search_query = state.get("search_query", query)
@@ -219,6 +229,7 @@ class AgentWorkflowEngine:
         if is_ollama_online:
             self.producer.send_event(
                 session_id=session_id,
+                conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"🧠 [로컬 LLM {OLLAMA_MODEL}] 실시간 웹 데이터 기반 자연어 추론 및 리포트 작성 중",
@@ -227,6 +238,7 @@ class AgentWorkflowEngine:
         else:
             self.producer.send_event(
                 session_id=session_id,
+                conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📝 [동적 룰 기반 엔진] 수집 데이터 기반 리포트 생성 중 (Ollama 미연결)",
@@ -286,6 +298,7 @@ class AgentWorkflowEngine:
                 # Kafka로 실시간 LLM 토큰 CHUNK 전송
                 self.producer.send_event(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     host_id=host_id,
                     event_type="CHUNK",
                     content=token,
@@ -317,6 +330,7 @@ class AgentWorkflowEngine:
 
                 self.producer.send_event(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     host_id=host_id,
                     event_type="CHUNK",
                     content=chunk_str,
@@ -332,15 +346,16 @@ class AgentWorkflowEngine:
         Kafka A2UI_RENDER 이벤트로 클라이언트에 전송합니다.
         """
         session_id = state["session_id"]
+        conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
         category = state.get("category", "general")
         results = state.get("search_results", [])
-        keywords = state.get("extracted_keywords", [])
 
         # A2UI 상태 메시지 송신
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
             content=f"🎨 [{category.upper()}] LLM 연동 맞춤형 A2UI 대시보드 UI 컴포넌트 생성 중",
@@ -371,6 +386,7 @@ class AgentWorkflowEngine:
         # Kafka로 A2UI_RENDER 이벤트 송신
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="A2UI_RENDER",
             content=a2ui_json,
@@ -380,6 +396,7 @@ class AgentWorkflowEngine:
         # 최종 작업 완결 알림 신호(DONE) 발행
         self.producer.send_event(
             session_id=session_id,
+            conversation_id=conversation_id,
             host_id=host_id,
             event_type="DONE",
             content=f"[{category.upper()}] Qwen2.5-7B LLM Natural Language Report Completed",
@@ -388,12 +405,13 @@ class AgentWorkflowEngine:
 
         return {}
 
-    def execute(self, session_id: str, host_id: str, query: str) -> None:
+    def execute(self, session_id: str, host_id: str, query: str, conversation_id: str = "") -> None:
         """
         초기 상태 객체를 세팅하고 LangGraph 에이전트 추론 루프를 실행하는 메인 진입점 함수입니다.
         """
         initial_state: ResearchState = {
             "session_id": session_id,
+            "conversation_id": conversation_id,
             "host_id": host_id,
             "query": query,
             "search_query": "",
@@ -411,6 +429,7 @@ class AgentWorkflowEngine:
             print(f"[AgentEngine ERROR] 그래프 실행 중 예외 발생: {e}")
             self.producer.send_event(
                 session_id=session_id,
+                conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="ERROR",
                 content=f"AI 에이전트 처리 중 오류가 발생했습니다: {str(e)}",

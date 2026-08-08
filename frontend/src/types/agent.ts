@@ -7,6 +7,7 @@ export interface EventMetadata {
 
 export interface AgentEvent {
   sessionId: string;
+  conversationId?: string;
   hostId?: string;
   type: EventType;
   content: string;
@@ -46,4 +47,24 @@ export interface A2UIData {
     description: string;
     options: A2UIActionOption[];
   };
+}
+
+export interface ConversationSummary {
+  conversationId: string;
+  title: string;
+  category: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConversationDetail {
+  conversationId: string;
+  title: string;
+  category: string;
+  createdAt: number;
+  updatedAt: number;
+  timelineEvents: AgentEvent[];
+  fullReport: string;
+  a2uiPayload?: string | null;
+  isCompleted: boolean;
 }

@@ -2,6 +2,7 @@ package com.agent.stream.routing
 
 import com.agent.stream.dto.AgentResponseEvent
 import com.agent.stream.dto.EventMetadata
+import com.agent.stream.service.ConversationHistoryStore
 import com.agent.stream.service.RedisRoutingService
 import com.agent.stream.service.StreamService
 import com.agent.stream.session.SessionRegistry
@@ -33,6 +34,7 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
         // Node 2 (Host ID: kotlin-node-2) 세팅
         val node2HostId = "kotlin-node-2"
         val node2SessionRegistry = SessionRegistry()
+        val conversationHistoryStore = ConversationHistoryStore()
 
         // 가짜(Fake) Redis 상태 기록 변수
         var lastPublishedChannel = ""
@@ -75,6 +77,7 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
             kafkaTemplate = fakeKafkaTemplate,
             sessionRegistry = node2SessionRegistry,
             redisRoutingService = node2RedisRoutingService,
+            conversationHistoryStore = conversationHistoryStore,
             hostId = node2HostId,
             objectMapper = objectMapper
         )
@@ -88,6 +91,7 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
             `when`("Node 2가 Kafka에서 Node 1을 타깃으로 하는 응답 이벤트를 수신하면") {
                 val incomingEvent = AgentResponseEvent(
                     sessionId = userSessionId,
+                    conversationId = "conv-test-123",
                     hostId = node1HostId, // 타겟은 Node 1!
                     type = "CHUNK",
                     content = "Ollama Qwen2.5-7B 토큰 테스트 데이터",

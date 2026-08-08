@@ -16,10 +16,11 @@ def handle_agent_request(request_data: Dict[str, Any]) -> None:
     """
     Kafka 'agent-requests' 토픽으로부터 수신받은 JSON 파싱 딕셔너리를 처리하는 콜백 함수입니다.
     
-    :param request_data: {"sessionId": "...", "hostId": "...", "query": "..."}
+    :param request_data: {"sessionId": "...", "conversationId": "...", "hostId": "...", "query": "..."}
     """
-    # 딕셔너리로부터 필수 항목인 sessionId, hostId, query를 추출합니다.
+    # 딕셔너리로부터 필수 항목인 sessionId, conversationId, hostId, query를 추출합니다.
     session_id = request_data.get("sessionId", "")
+    conversation_id = request_data.get("conversationId", "")
     host_id = request_data.get("hostId", "")
     query = request_data.get("query", "")
     action_id = request_data.get("actionId", "")
@@ -30,7 +31,7 @@ def handle_agent_request(request_data: Dict[str, Any]) -> None:
         selected_label = payload.get("label", action_id)
         query = f"A2UI 후속 분석 요청: {selected_label}"
 
-    print(f"\n[AgentWorker] 🚀 새로운 리서치 요청 수신! (Session: {session_id}, Host: {host_id})")
+    print(f"\n[AgentWorker] 🚀 새로운 리서치 요청 수신! (Conv: {conversation_id}, Session: {session_id}, Host: {host_id})")
     print(f"[AgentWorker] ❓ 질문/액션 내용: '{query}'")
 
     # 세션 ID나 질문이 누락된 유효하지 않은 요청인 경우 예외 로그 출력 후 스킵합니다.
@@ -39,8 +40,13 @@ def handle_agent_request(request_data: Dict[str, Any]) -> None:
         return
 
     # LangGraph 에이전트 워크플로우 엔진을 기동하여 다단계 리서치를 실행합니다.
-    workflow_engine.execute(session_id=session_id, host_id=host_id, query=query)
-    print(f"[AgentWorker] ✨ 리서치 작업 완료 (Session: {session_id})\n")
+    workflow_engine.execute(
+        session_id=session_id,
+        host_id=host_id,
+        query=query,
+        conversation_id=conversation_id
+    )
+    print(f"[AgentWorker] ✨ 리서치 작업 완료 (Conv: {conversation_id}, Session: {session_id})\n")
 
 
 def main() -> None:
