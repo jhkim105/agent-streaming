@@ -81,23 +81,22 @@ class ConversationHistoryStore {
 
         val now = System.currentTimeMillis()
 
-        // 1. LLM 스마트 타이틀 메타데이터 수신 시 대화 제목 동적 갱신
+        // 1. LLM 스마트 타이틀 메타데이터 수신 시 대화 제목 동적 갱신 (실제 타이틀이 달라졌을 때만 1회 수행!)
         conversations[conversationId]?.let { existing ->
             val smartTitle = event.metadata.title
-            val updatedTitle = if (smartTitle.isNotBlank()) {
-                logger.info { "LLM 스마트 타이틀로 갱신: conversationId=$conversationId, title='$smartTitle'" }
-                smartTitle
-            } else existing.title
+            if (smartTitle.isNotBlank() && existing.title != smartTitle) {
+                logger.info { "LLM 스마트 타이틀로 갱신 (1회 수행): conversationId=$conversationId, title='$smartTitle'" }
 
-            val updatedCategory = if (event.content.contains("[TECH]") || event.content.contains("TECH")) "tech"
-            else if (event.content.contains("[BUSINESS]") || event.content.contains("BUSINESS")) "business"
-            else existing.category
+                val updatedCategory = if (event.content.contains("[TECH]") || event.content.contains("TECH")) "tech"
+                else if (event.content.contains("[BUSINESS]") || event.content.contains("BUSINESS")) "business"
+                else existing.category
 
-            conversations[conversationId] = existing.copy(
-                title = updatedTitle,
-                category = updatedCategory,
-                updatedAt = now
-            )
+                conversations[conversationId] = existing.copy(
+                    title = smartTitle,
+                    category = updatedCategory,
+                    updatedAt = now
+                )
+            }
         }
 
         // 2. 이벤트 유형별 축적
@@ -137,7 +136,7 @@ class ConversationHistoryStore {
         val timeline = timelineEventsMap[conversationId] ?: emptyList()
         val fullReport = reportBuilderMap[conversationId]?.toString() ?: ""
         val a2uiPayload = a2uiPayloadMap[conversationId]
-        val isCompleted = completionMap[completionMap.keys.find { it == conversationId }] ?: false
+        val isCompleted = completionMap[conversationId] ?: false
 
         return ConversationDetailDto(
             conversationId = summary.conversationId,

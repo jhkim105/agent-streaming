@@ -74,7 +74,7 @@ class AgentWorkflowEngine:
     def _node_query_analysis(self, state: ResearchState) -> Dict[str, Any]:
         """
         [1단계 노드] 사용자의 질문을 분석하여 카테고리(기술/비즈니스/일반)를 분류하고,
-        이모지가 포함된 15자 이내의 LLM 스마트 대화 타이틀(smart_title)을 자동 생성합니다.
+        이모지가 포함된 15자 이내의 LLM 스마트 대화 타이틀(smart_title)을 1회 생성합니다.
         """
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
@@ -127,7 +127,7 @@ class AgentWorkflowEngine:
 
         smart_title = f"{prefix_emoji}{raw_summary}"
 
-        # Kafka로 에이전트의 스마트 타이틀 메타데이터와 함께 분석 시작 알림 전송
+        # Kafka로 에이전트의 스마트 타이틀 메타데이터와 함께 분석 시작 알림 전송 (1회 명확히 전달)
         self.producer.send_event(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -139,7 +139,7 @@ class AgentWorkflowEngine:
         )
         time.sleep(0.3)
 
-        # 분석 완료 이벤트 발송 (smart_title 동시 전달)
+        # 분석 완료 이벤트 발송
         self.producer.send_event(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -165,7 +165,6 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
-        smart_title = state.get("smart_title", "")
         search_query = state.get("search_query", state["query"])
 
         self.producer.send_event(
@@ -174,7 +173,6 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"🌐 DuckDuckGo 타깃 실시간 웹 검색 중 (검색어: '{search_query}')",
-            title=smart_title,
             step="web_search"
         )
 
@@ -186,7 +184,6 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"✅ 실시간 웹 검색 결과 {len(results)}건 수집 완료",
-            title=smart_title,
             step="web_search"
         )
         time.sleep(0.3)
@@ -200,7 +197,6 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
-        smart_title = state.get("smart_title", "")
         results = state.get("search_results", [])
 
         scraped_texts: List[str] = []
@@ -217,7 +213,6 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📄 본문 스크래핑 중 ({idx+1}/{len(results)}): {title[:25]}...",
-                title=smart_title,
                 step="web_scraping"
             )
 
@@ -237,7 +232,6 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
-        smart_title = state.get("smart_title", "")
         query = state["query"]
         search_query = state.get("search_query", query)
         category = state.get("category", "general")
@@ -254,7 +248,6 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"🧠 [로컬 LLM {OLLAMA_MODEL}] 실시간 웹 데이터 기반 자연어 추론 및 리포트 작성 중",
-                title=smart_title,
                 step="report_generation"
             )
         else:
@@ -264,7 +257,6 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📝 [동적 룰 기반 엔진] 수집 데이터 기반 리포트 생성 중 (Ollama 미연결)",
-                title=smart_title,
                 step="report_generation"
             )
 
@@ -318,14 +310,13 @@ class AgentWorkflowEngine:
             for token in token_generator:
                 full_report_text += token
 
-                # Kafka로 실시간 LLM 토큰 CHUNK 전송
+                # Kafka로 실시간 LLM 토큰 CHUNK 전송 (매 CHUNK 시 title 무겁게 보내지 않음!)
                 self.producer.send_event(
                     session_id=session_id,
                     conversation_id=conversation_id,
                     host_id=host_id,
                     event_type="CHUNK",
                     content=token,
-                    title=smart_title,
                     step="report_generation"
                 )
 
@@ -358,7 +349,6 @@ class AgentWorkflowEngine:
                     host_id=host_id,
                     event_type="CHUNK",
                     content=chunk_str,
-                    title=smart_title,
                     step="report_generation"
                 )
                 time.sleep(0.02)
@@ -373,7 +363,6 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
-        smart_title = state.get("smart_title", "")
         query = state["query"]
         category = state.get("category", "general")
         results = state.get("search_results", [])
@@ -385,7 +374,6 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"🎨 [{category.upper()}] LLM 연동 맞춤형 A2UI 대시보드 UI 컴포넌트 생성 중",
-            title=smart_title,
             step="a2ui_generation"
         )
 
@@ -417,7 +405,6 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="A2UI_RENDER",
             content=a2ui_json,
-            title=smart_title,
             step="a2ui_generation"
         )
 
@@ -428,7 +415,6 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="DONE",
             content=f"[{category.upper()}] Qwen2.5-7B LLM Natural Language Report Completed",
-            title=smart_title,
             step="completed"
         )
 
