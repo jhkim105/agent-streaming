@@ -73,50 +73,45 @@ class ConversationHistoryStore {
     }
 
     /**
-     * 카프카/Redis로 전달받은 스트리밍 이벤트를 대화 이력에 축적하며, LLM 스마트 타이틀이 넘어오면 제목을 갱신합니다.
+     * 카프카/Redis로 전달받은 스트리밍 이벤트를 축적하고, DONE 스트림 완결 시점에 1회 일괄 저장 및 LLM 스마트 타이틀 갱신을 실행합니다.
      */
     fun appendEvent(event: AgentResponseEvent) {
         val conversationId = event.conversationId
         if (conversationId.isBlank()) return
 
-        val now = System.currentTimeMillis()
-
-        // 1. LLM 스마트 타이틀 메타데이터 수신 시 대화 제목 동적 갱신 (실제 타이틀이 달라졌을 때만 1회 수행!)
-        conversations[conversationId]?.let { existing ->
-            val smartTitle = event.metadata.title
-            if (smartTitle.isNotBlank() && existing.title != smartTitle) {
-                logger.info { "LLM 스마트 타이틀로 갱신 (1회 수행): conversationId=$conversationId, title='$smartTitle'" }
-
-                val updatedCategory = if (event.content.contains("[TECH]") || event.content.contains("TECH")) "tech"
-                else if (event.content.contains("[BUSINESS]") || event.content.contains("BUSINESS")) "business"
-                else existing.category
-
-                conversations[conversationId] = existing.copy(
-                    title = smartTitle,
-                    category = updatedCategory,
-                    updatedAt = now
-                )
-            }
-        }
-
-        // 2. 이벤트 유형별 축적
+        // 1. 이벤트 유형별 스트림 축적
         when (event.type) {
             "STATUS" -> {
-                // 타임라인 진행 상태 이벤트 축적
                 timelineEventsMap.computeIfAbsent(conversationId) { CopyOnWriteArrayList() }.add(event)
             }
             "CHUNK" -> {
-                // 마크다운 리포트 토큰 조각 축적
                 reportBuilderMap.computeIfAbsent(conversationId) { StringBuilder() }.append(event.content)
             }
             "A2UI_RENDER" -> {
-                // A2UI JSON 대시보드 저장
                 a2uiPayloadMap[conversationId] = event.content
             }
             "DONE" -> {
-                // 작업 완료 처리
+                // 2. [스트림 완결 DONE 시점] 1회 일괄 저장(Batch Persistence) & 스마트 타이틀 1회 확정 갱신!
+                val now = System.currentTimeMillis()
+                val smartTitle = event.metadata.title
+
+                conversations[conversationId]?.let { existing ->
+                    val finalTitle = if (smartTitle.isNotBlank()) smartTitle else existing.title
+
+                    val finalCategory = if (event.content.contains("[TECH]") || event.content.contains("TECH")) "tech"
+                    else if (event.content.contains("[BUSINESS]") || event.content.contains("BUSINESS")) "business"
+                    else existing.category
+
+                    logger.info { "대화 스트림 완결 1회 일괄 저장 & 스마트 타이틀 갱신 완료: conversationId=$conversationId, title='$finalTitle'" }
+
+                    conversations[conversationId] = existing.copy(
+                        title = finalTitle,
+                        category = finalCategory,
+                        updatedAt = now
+                    )
+                }
+
                 completionMap[conversationId] = true
-                logger.info { "대화 스레드 리포트 생성 완료: conversationId=$conversationId" }
             }
         }
     }

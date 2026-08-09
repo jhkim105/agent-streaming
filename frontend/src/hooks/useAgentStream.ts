@@ -127,7 +127,7 @@ export function useAgentStream() {
       }
     });
 
-    // 2. STATUS 이벤트 (에이전트 추론 단계 로깅 및 LLM 스마트 타이틀 갱신 반영)
+    // 2. STATUS 이벤트 (에이전트 추론 단계 로깅)
     es.addEventListener('STATUS', (event) => {
       try {
         if (event.lastEventId) {
@@ -142,11 +142,6 @@ export function useAgentStream() {
           timestamp: data.metadata?.timestamp || Date.now()
         };
         setStatusLogs((prev) => [...prev, newLog]);
-
-        // 스마트 타이틀 메타데이터가 넘어오면 히스토리 목록 실시간 갱신
-        if (data.metadata?.title) {
-          fetchConversations();
-        }
       } catch (err) {
         console.error('[SSE STATUS ERROR]', err);
       }
@@ -178,7 +173,7 @@ export function useAgentStream() {
       }
     });
 
-    // 5. DONE 이벤트 (리서치 완결)
+    // 5. DONE 이벤트 (리서치 완결 시 1회 완결 스마트 타이틀 적용 및 히스토리 목록 갱신)
     es.addEventListener('DONE', () => {
       setIsResearching(false);
       console.log('[SSE DONE] Research report stream completed');
