@@ -43,6 +43,7 @@ class AgentKafkaProducer:
         event_type: str,
         content: str,
         conversation_id: str = "",
+        title: str = "",
         step: str = ""
     ) -> None:
         """
@@ -52,6 +53,7 @@ class AgentKafkaProducer:
         - event_type: 이벤트 종류 (STATUS | CHUNK | A2UI_RENDER | DONE | ERROR)
         - content: 텍스트 내용 (상태 로그 메시지 또는 LLM 생성 토큰 조각)
         - conversation_id: 비즈니스 리서치 대화 식별자
+        - title: LLM이 생성한 스마트 이모지 요약 타이틀 (예: 🌱 Spring Boot & Kotlin 동향)
         - step: 에이전트의 현재 추론 단계 이름 (예: query_analysis, search, scraping)
         """
         # 카프카 응답 스키마 규격에 맞게 파이썬 딕셔너리를 구성합니다.
@@ -63,6 +65,7 @@ class AgentKafkaProducer:
             "content": content,
             "metadata": {
                 "step": step,
+                "title": title,
                 "timestamp": int(time.time() * 1000)  # 밀리초 단위 현재 타임스탬프
             }
         }

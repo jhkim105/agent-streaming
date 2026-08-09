@@ -33,7 +33,7 @@ class ConversationHistoryStore {
     private val completionMap = ConcurrentHashMap<String, Boolean>()
 
     /**
-     * conversationId가 없으면 신규 생성하고, 있으면 기존 대화를 가져옵니다.
+     * conversationId가 없으면 신규 생성하고, 질문 유입 시 질문 원본 텍스트로 타이틀을 1차 갱신합니다.
      */
     fun getOrCreateConversation(conversationIdInput: String?, query: String? = null): String {
         val conversationId = if (!conversationIdInput.isNullOrBlank()) {
@@ -42,28 +42,38 @@ class ConversationHistoryStore {
             "conv-" + UUID.randomUUID().toString().take(8)
         }
 
-        if (!conversations.containsKey(conversationId)) {
-            val title = if (!query.isNullOrBlank()) {
-                if (query.length > 25) query.take(25) + "..." else query
+        val now = System.currentTimeMillis()
+        val formattedTitle = if (!query.isNullOrBlank()) {
+            if (query.length > 35) query.take(35) + "..." else query
+        } else {
+            "신규 리서치 대화 (${conversationId.takeLast(6)})"
+        }
+
+        conversations.compute(conversationId) { id, existing ->
+            if (existing == null) {
+                logger.info { "신규 대화 스레드 생성: conversationId=$id, title='$formattedTitle'" }
+                ConversationSummaryDto(
+                    conversationId = id,
+                    title = formattedTitle,
+                    category = "general",
+                    createdAt = now,
+                    updatedAt = now
+                )
             } else {
-                "신규 리서치 대화 (${conversationId.takeLast(6)})"
+                // 기존 대화 제목이 '신규 리서치 대화'인 경우 실제 질문 텍스트로 1차 갱신
+                val updatedTitle = if (existing.title.startsWith("신규 리서치 대화") && !query.isNullOrBlank()) {
+                    formattedTitle
+                } else existing.title
+
+                existing.copy(title = updatedTitle, updatedAt = now)
             }
-            val now = System.currentTimeMillis()
-            logger.info { "신규 대화 스레드 생성: conversationId=$conversationId, title='$title'" }
-            conversations[conversationId] = ConversationSummaryDto(
-                conversationId = conversationId,
-                title = title,
-                category = "general",
-                createdAt = now,
-                updatedAt = now
-            )
         }
 
         return conversationId
     }
 
     /**
-     * 카프카/Redis로 전달받은 스트리밍 이벤트를 대화 이력에 축적합니다.
+     * 카프카/Redis로 전달받은 스트리밍 이벤트를 대화 이력에 축적하며, LLM 스마트 타이틀이 넘어오면 제목을 갱신합니다.
      */
     fun appendEvent(event: AgentResponseEvent) {
         val conversationId = event.conversationId
@@ -71,18 +81,26 @@ class ConversationHistoryStore {
 
         val now = System.currentTimeMillis()
 
-        // 대화 생성 타임스탬프 갱신
+        // 1. LLM 스마트 타이틀 메타데이터 수신 시 대화 제목 동적 갱신
         conversations[conversationId]?.let { existing ->
+            val smartTitle = event.metadata.title
+            val updatedTitle = if (smartTitle.isNotBlank()) {
+                logger.info { "LLM 스마트 타이틀로 갱신: conversationId=$conversationId, title='$smartTitle'" }
+                smartTitle
+            } else existing.title
+
             val updatedCategory = if (event.content.contains("[TECH]") || event.content.contains("TECH")) "tech"
             else if (event.content.contains("[BUSINESS]") || event.content.contains("BUSINESS")) "business"
             else existing.category
 
             conversations[conversationId] = existing.copy(
+                title = updatedTitle,
                 category = updatedCategory,
                 updatedAt = now
             )
         }
 
+        // 2. 이벤트 유형별 축적
         when (event.type) {
             "STATUS" -> {
                 // 타임라인 진행 상태 이벤트 축적
@@ -119,7 +137,7 @@ class ConversationHistoryStore {
         val timeline = timelineEventsMap[conversationId] ?: emptyList()
         val fullReport = reportBuilderMap[conversationId]?.toString() ?: ""
         val a2uiPayload = a2uiPayloadMap[conversationId]
-        val isCompleted = completionMap[conversationId] ?: false
+        val isCompleted = completionMap[completionMap.keys.find { it == conversationId }] ?: false
 
         return ConversationDetailDto(
             conversationId = summary.conversationId,

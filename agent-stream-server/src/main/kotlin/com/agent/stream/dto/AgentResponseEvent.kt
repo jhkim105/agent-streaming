@@ -5,7 +5,7 @@ package com.agent.stream.dto
  */
 data class AgentResponseEvent(
     val sessionId: String,
-    val conversationId: String = "", // 비즈니스 대화 식별자 (미전달 시 빈 문자열)
+    val conversationId: String = "", // 비즈니스 대화 식별자
     val hostId: String,
     val type: String, // INIT | STATUS | CHUNK | A2UI_RENDER | DONE | ERROR
     val content: String,
@@ -17,5 +17,6 @@ data class AgentResponseEvent(
  */
 data class EventMetadata(
     val step: String = "",
+    val title: String = "", // LLM이 요약 생성한 이모지 스마트 대화 타이틀 (예: "🌱 Spring Boot & Kotlin 동향")
     val timestamp: Long = System.currentTimeMillis()
 )

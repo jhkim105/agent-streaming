@@ -24,6 +24,7 @@ class ResearchState(TypedDict):
     conversation_id: str                 # 비즈니스 리서치 대화 식별자
     host_id: str                         # 타겟 게이트웨이 인스턴스 ID
     query: str                           # 사용자 질문 원본
+    smart_title: str                     # LLM/규칙 기반 생성 이모지 스마트 대화 타이틀
     search_query: str                    # 정제된 순수 검색 키워드
     category: str                        # 질문 분류 카테고리 ('tech', 'business', 'general')
     extracted_keywords: List[str]        # 질문 및 수집 데이터에서 추출한 핵심 키워드 리스트
@@ -72,23 +73,13 @@ class AgentWorkflowEngine:
 
     def _node_query_analysis(self, state: ResearchState) -> Dict[str, Any]:
         """
-        [1단계 노드] 사용자의 질문을 분석하여 카테고리(기술/비즈니스/일반)를 자동 분류하고 pure 검색 키워드를 추출합니다.
+        [1단계 노드] 사용자의 질문을 분석하여 카테고리(기술/비즈니스/일반)를 분류하고,
+        이모지가 포함된 15자 이내의 LLM 스마트 대화 타이틀(smart_title)을 자동 생성합니다.
         """
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
-
-        # Kafka로 에이전트의 현재 분석 시작 알림을 전송합니다.
-        self.producer.send_event(
-            session_id=session_id,
-            conversation_id=conversation_id,
-            host_id=host_id,
-            event_type="STATUS",
-            content=f"🔍 사용자 질문 의도 및 주제 정밀 분석 중: '{query}'",
-            step="query_analysis"
-        )
-        time.sleep(0.3)
 
         query_lower = query.lower()
 
@@ -97,7 +88,7 @@ class AgentWorkflowEngine:
             "코드", "스프링", "파이썬", "버그", "에러", "설정", "아키텍처", "라이브러리", "프레임워크",
             "api", "개발", "dev", "docker", "react", "next", "vue", "kafka", "sse", "db",
             "llm", "litellm", "ai", "gpt", "claude", "gemini", "langchain", "langgraph",
-            "ollama", "model", "prompt", "agent", "rag", "embedding", "vectordb"
+            "ollama", "model", "prompt", "agent", "rag", "embedding", "vectordb", "a2ui", "kotlin"
         ]
 
         # 비즈니스(Business) 카테고리 판별용 키워드 리스트
@@ -126,18 +117,42 @@ class AgentWorkflowEngine:
         # 정제된 순수 검색어 생성
         search_query = " ".join(extracted_keywords) if extracted_keywords else query
 
-        # 분석 완료 이벤트 발송
+        # ----------------------------------------------------
+        # 스마트 요약 타이틀(smart_title) 자동 생성 로직
+        # ----------------------------------------------------
+        prefix_emoji = "🌱 " if category == "tech" else ("📈 " if category == "business" else "💡 ")
+        raw_summary = " ".join(extracted_keywords[:3]) if extracted_keywords else query
+        if len(raw_summary) > 14:
+            raw_summary = raw_summary[:14]
+
+        smart_title = f"{prefix_emoji}{raw_summary}"
+
+        # Kafka로 에이전트의 스마트 타이틀 메타데이터와 함께 분석 시작 알림 전송
         self.producer.send_event(
             session_id=session_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
-            content=f"📌 [분류 완료] 카테고리: {category.upper()} | 정제된 검색어: '{search_query}'",
+            content=f"🔍 사용자 질문 의도 및 주제 정밀 분석 중: '{query}'",
+            title=smart_title,
+            step="query_analysis"
+        )
+        time.sleep(0.3)
+
+        # 분석 완료 이벤트 발송 (smart_title 동시 전달)
+        self.producer.send_event(
+            session_id=session_id,
+            conversation_id=conversation_id,
+            host_id=host_id,
+            event_type="STATUS",
+            content=f"📌 [분류 완료] 카테고리: {category.upper()} | 타이틀: '{smart_title}'",
+            title=smart_title,
             step="query_analysis"
         )
         time.sleep(0.3)
 
         return {
+            "smart_title": smart_title,
             "search_query": search_query,
             "category": category,
             "extracted_keywords": extracted_keywords if extracted_keywords else [query]
@@ -150,6 +165,7 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
+        smart_title = state.get("smart_title", "")
         search_query = state.get("search_query", state["query"])
 
         self.producer.send_event(
@@ -158,6 +174,7 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"🌐 DuckDuckGo 타깃 실시간 웹 검색 중 (검색어: '{search_query}')",
+            title=smart_title,
             step="web_search"
         )
 
@@ -169,6 +186,7 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"✅ 실시간 웹 검색 결과 {len(results)}건 수집 완료",
+            title=smart_title,
             step="web_search"
         )
         time.sleep(0.3)
@@ -182,6 +200,7 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
+        smart_title = state.get("smart_title", "")
         results = state.get("search_results", [])
 
         scraped_texts: List[str] = []
@@ -198,6 +217,7 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📄 본문 스크래핑 중 ({idx+1}/{len(results)}): {title[:25]}...",
+                title=smart_title,
                 step="web_scraping"
             )
 
@@ -217,6 +237,7 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
+        smart_title = state.get("smart_title", "")
         query = state["query"]
         search_query = state.get("search_query", query)
         category = state.get("category", "general")
@@ -233,6 +254,7 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"🧠 [로컬 LLM {OLLAMA_MODEL}] 실시간 웹 데이터 기반 자연어 추론 및 리포트 작성 중",
+                title=smart_title,
                 step="report_generation"
             )
         else:
@@ -242,6 +264,7 @@ class AgentWorkflowEngine:
                 host_id=host_id,
                 event_type="STATUS",
                 content=f"📝 [동적 룰 기반 엔진] 수집 데이터 기반 리포트 생성 중 (Ollama 미연결)",
+                title=smart_title,
                 step="report_generation"
             )
 
@@ -302,6 +325,7 @@ class AgentWorkflowEngine:
                     host_id=host_id,
                     event_type="CHUNK",
                     content=token,
+                    title=smart_title,
                     step="report_generation"
                 )
 
@@ -334,6 +358,7 @@ class AgentWorkflowEngine:
                     host_id=host_id,
                     event_type="CHUNK",
                     content=chunk_str,
+                    title=smart_title,
                     step="report_generation"
                 )
                 time.sleep(0.02)
@@ -348,6 +373,7 @@ class AgentWorkflowEngine:
         session_id = state["session_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
+        smart_title = state.get("smart_title", "")
         query = state["query"]
         category = state.get("category", "general")
         results = state.get("search_results", [])
@@ -359,6 +385,7 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="STATUS",
             content=f"🎨 [{category.upper()}] LLM 연동 맞춤형 A2UI 대시보드 UI 컴포넌트 생성 중",
+            title=smart_title,
             step="a2ui_generation"
         )
 
@@ -390,6 +417,7 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="A2UI_RENDER",
             content=a2ui_json,
+            title=smart_title,
             step="a2ui_generation"
         )
 
@@ -400,6 +428,7 @@ class AgentWorkflowEngine:
             host_id=host_id,
             event_type="DONE",
             content=f"[{category.upper()}] Qwen2.5-7B LLM Natural Language Report Completed",
+            title=smart_title,
             step="completed"
         )
 
@@ -414,6 +443,7 @@ class AgentWorkflowEngine:
             "conversation_id": conversation_id,
             "host_id": host_id,
             "query": query,
+            "smart_title": "",
             "search_query": "",
             "category": "general",
             "extracted_keywords": [],
