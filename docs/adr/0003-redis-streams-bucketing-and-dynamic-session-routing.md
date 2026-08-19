@@ -3,7 +3,7 @@
 * **상태 (Status)**: 승인됨 (Accepted)
 * **날짜 (Date)**: 2026-08-08
 * **작성자 (Author)**: Antigravity Agent & User
-* **관련 문서**: [ADR 0001 세션 라우팅](0001-multi-node-session-routing.md) | [ADR 0002 코틀린 SSE](0002-kotlin-sse-coroutine-flow.md) | [요구사항 정의서](../1.requirements.md) | [시스템 아키텍처](../2.architecture.md)
+* **관련 문서**: [ADR 0001 세션 라우팅](0001-multi-node-session-routing.md) | [ADR 0002 코틀린 SSE](0002-kotlin-sse-coroutine-flow.md) | [요구사항 정의서](../requirements.md) | [시스템 아키텍처](../architecture.md)
 
 ---
 

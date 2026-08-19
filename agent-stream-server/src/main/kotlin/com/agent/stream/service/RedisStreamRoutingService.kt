@@ -1,6 +1,6 @@
 package com.agent.stream.service
 
-import com.agent.stream.dto.AgentResponseEvent
+import com.agent.stream.dto.AgentEvent
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -41,7 +41,6 @@ class RedisStreamRoutingService(
 
         val streamOffset = StreamOffset.create(myStreamKey, ReadOffset.latest())
 
-        // 본인 노드의 Redis Stream을 XREAD 연속 수신
         streamSubscription = redisTemplate.opsForStream<String, String>()
             .read(streamOffset)
             .repeat()
@@ -49,12 +48,13 @@ class RedisStreamRoutingService(
             .subscribe({ record ->
                 try {
                     val eventJson = record.value["payload"]
+                    val targetConnectionId = record.value["targetConnectionId"] ?: ""
                     if (!eventJson.isNullOrBlank()) {
-                        val event = objectMapper.readValue(eventJson, AgentResponseEvent::class.java)
+                        val event = objectMapper.readValue(eventJson, AgentEvent::class.java)
                         val streamRecordId = record.id.value
 
-                        logger.debug { "노드전용 Stream 이벤트 수신 (ID=$streamRecordId): type=${event.type}, sessionId=${event.sessionId}" }
-                        dispatchToLocalClient(event, streamRecordId)
+                        logger.debug { "노드전용 Stream 이벤트 수신 (ID=$streamRecordId): type=${event.type}, targetConnectionId=$targetConnectionId" }
+                        dispatchToLocalClient(event, targetConnectionId, streamRecordId)
                     }
                 } catch (e: Exception) {
                     logger.error(e) { "Redis Stream 메시지 파싱 중 오류 발생: recordId=${record.id.value}" }
@@ -73,12 +73,16 @@ class RedisStreamRoutingService(
     /**
      * 타깃 노드의 전용 레디스 스트림(stream:host:{targetHostId})에 이벤트를 무유실 XADD 전송합니다.
      */
-    open fun publishToTargetStream(targetHostId: String, event: AgentResponseEvent): Mono<String> {
+    open fun publishToTargetStream(targetHostId: String, targetConnectionId: String, event: AgentEvent): Mono<String> {
         val targetStreamKey = "$streamKeyPrefix$targetHostId"
         val eventJson = objectMapper.writeValueAsString(event)
-        val body = mapOf("payload" to eventJson, "sessionId" to event.sessionId)
+        val body = mapOf(
+            "payload" to eventJson,
+            "targetConnectionId" to targetConnectionId,
+            "commandId" to event.commandId
+        )
 
-        logger.info { "Redis Stream XADD 릴레이 (ADR 0003): targetStreamKey=$targetStreamKey, type=${event.type}, sessionId=${event.sessionId}" }
+        logger.info { "Redis Stream XADD 릴레이 (ADR 0003): targetStreamKey=$targetStreamKey, type=${event.type}, targetConnectionId=$targetConnectionId" }
         return redisTemplate.opsForStream<String, String>()
             .add(targetStreamKey, body)
             .map { recordId -> recordId.value }
@@ -87,7 +91,7 @@ class RedisStreamRoutingService(
     /**
      * W3C Last-Event-ID 커서 기반 Stream 복원: 특정 lastEventId 이후의 미열람 스트림 이벤트를 XREAD로 조회합니다.
      */
-    fun readStreamEventsAfter(lastEventId: String): Mono<List<AgentResponseEvent>> {
+    fun readStreamEventsAfter(lastEventId: String): Mono<List<AgentEvent>> {
         val myStreamKey = "$streamKeyPrefix$hostId"
         val readOffset = ReadOffset.from(lastEventId)
         val streamOffset = StreamOffset.create(myStreamKey, readOffset)
@@ -96,31 +100,31 @@ class RedisStreamRoutingService(
             .read(streamOffset)
             .map { record ->
                 val eventJson = record.value["payload"] ?: ""
-                objectMapper.readValue(eventJson, AgentResponseEvent::class.java)
+                objectMapper.readValue(eventJson, AgentEvent::class.java)
             }
             .collectList()
     }
 
     /**
-     * local SSE SendChannel 세션에 이벤트를 전송하며, W3C Last-Event-ID(Stream Entry ID)를 헤더/데이터에 주입합니다.
+     * local SSE SendChannel 세션에 이벤트를 전송하며, eventId를 W3C SSE id로 전송합니다.
      */
-    private fun dispatchToLocalClient(event: AgentResponseEvent, streamRecordId: String) {
-        val channel = sessionRegistry.getChannel(event.sessionId)
+    private fun dispatchToLocalClient(event: AgentEvent, targetConnectionId: String, streamRecordId: String) {
+        val channel = sessionRegistry.getChannel(targetConnectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
-                .id(streamRecordId) // Redis Stream Entry ID를 SSE id로 전송 (W3C 표준)
+                .id(event.eventId.ifBlank { streamRecordId })
                 .event(event.type)
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
             val result = channel.trySend(sseEvent)
             if (result.isSuccess) {
-                logger.debug { "Client SSE 배달 성공 (Stream ID=$streamRecordId): type=${event.type}, sessionId=${event.sessionId}" }
+                logger.debug { "Client SSE 배달 성공 (Event ID=${event.eventId}): type=${event.type}, connectionId=$targetConnectionId" }
             } else {
-                logger.warn { "Client SSE 배달 실패 (Channel full or closed): sessionId=${event.sessionId}" }
+                logger.warn { "Client SSE 배달 실패 (Channel full or closed): connectionId=$targetConnectionId" }
             }
         } else {
-            logger.debug { "해당 sessionId의 로컬 세션을 찾을 수 없음 (새로고침 또는 닫힘): sessionId=${event.sessionId}" }
+            logger.debug { "해당 connectionId의 로컬 세션을 찾을 수 없음: connectionId=$targetConnectionId" }
         }
     }
 }

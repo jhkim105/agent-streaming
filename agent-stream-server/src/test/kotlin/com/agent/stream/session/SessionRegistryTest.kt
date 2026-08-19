@@ -12,24 +12,24 @@ class SessionRegistryTest : BehaviorSpec({
         val registry = SessionRegistry()
 
         `when`("새로운 SSE SendChannel 세션을 등록하면") {
-            val sessionId = "test-session-123"
+            val connectionId = "test-conn-123"
             val channel = Channel<ServerSentEvent<String>>()
 
-            registry.register(sessionId, channel)
+            registry.register(connectionId, channel)
 
             then("세션이 정상 등록되고 조회가 가능해야 한다") {
-                registry.hasSession(sessionId) shouldBe true
+                registry.hasSession(connectionId) shouldBe true
                 registry.activeSessionCount() shouldBe 1
-                registry.getChannel(sessionId) shouldNotBe null
+                registry.getChannel(connectionId) shouldNotBe null
             }
 
             `when`("해당 세션을 레지스트리에서 제거하면") {
-                registry.remove(sessionId)
+                registry.remove(connectionId)
 
                 then("세션이 말끔히 해제되어 활성 세션 수 0이 되어야 한다") {
-                    registry.hasSession(sessionId) shouldBe false
+                    registry.hasSession(connectionId) shouldBe false
                     registry.activeSessionCount() shouldBe 0
-                    registry.getChannel(sessionId) shouldBe null
+                    registry.getChannel(connectionId) shouldBe null
                 }
             }
         }

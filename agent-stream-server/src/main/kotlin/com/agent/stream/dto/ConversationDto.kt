@@ -20,8 +20,8 @@ data class ConversationDetailDto(
     val category: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val timelineEvents: List<AgentResponseEvent> = emptyList(), // STATUS 이벤트 목록 (타임라인용)
-    val fullReport: String = "",                               // 합성된 완성 마크다운 리포트
-    val a2uiPayload: String? = null,                            // A2UI JSON 대시보드 데이터
-    val isCompleted: Boolean = false                            // DONE 완료 여부
+    val timelineEvents: List<AgentEvent> = emptyList(), // STATUS 이벤트 목록 (타임라인용)
+    val fullReport: String = "",                         // 합성된 완성 마크다운 리포트
+    val a2uiPayload: String? = null,                      // A2UI JSON 대시보드 데이터
+    val isCompleted: Boolean = false                      // DONE 완료 여부
 )

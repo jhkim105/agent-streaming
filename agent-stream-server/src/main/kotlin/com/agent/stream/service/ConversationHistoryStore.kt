@@ -1,6 +1,6 @@
 package com.agent.stream.service
 
-import com.agent.stream.dto.AgentResponseEvent
+import com.agent.stream.dto.AgentEvent
 import com.agent.stream.dto.ConversationDetailDto
 import com.agent.stream.dto.ConversationSummaryDto
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -21,7 +21,7 @@ class ConversationHistoryStore {
     private val conversations = ConcurrentHashMap<String, ConversationSummaryDto>()
 
     // conversationId -> 타임라인 STATUS 이벤트 리스트 매핑
-    private val timelineEventsMap = ConcurrentHashMap<String, CopyOnWriteArrayList<AgentResponseEvent>>()
+    private val timelineEventsMap = ConcurrentHashMap<String, CopyOnWriteArrayList<AgentEvent>>()
 
     // conversationId -> 축적된 마크다운 보고서 StringBuilder 매핑
     private val reportBuilderMap = ConcurrentHashMap<String, StringBuilder>()
@@ -33,13 +33,33 @@ class ConversationHistoryStore {
     private val completionMap = ConcurrentHashMap<String, Boolean>()
 
     /**
-     * conversationId가 없으면 신규 생성하고, 질문 유입 시 질문 원본 텍스트로 타이틀을 1차 갱신합니다.
+     * 명시적으로 신규 대화 스레드를 생성합니다 (POST /api/chat/conversations)
+     */
+    fun createConversation(): String {
+        val conversationId = "conv-" + UUID.randomUUID().toString().take(8)
+        val now = System.currentTimeMillis()
+        val defaultTitle = "신규 리서치 대화 (${conversationId.takeLast(6)})"
+
+        val summary = ConversationSummaryDto(
+            conversationId = conversationId,
+            title = defaultTitle,
+            category = "general",
+            createdAt = now,
+            updatedAt = now
+        )
+        conversations[conversationId] = summary
+        logger.info { "신규 대화 스레드 생성 완료: conversationId=$conversationId" }
+        return conversationId
+    }
+
+    /**
+     * conversationId가 유효한지 확인하고 없으면 자동 생성합니다.
      */
     fun getOrCreateConversation(conversationIdInput: String?, query: String? = null): String {
         val conversationId = if (!conversationIdInput.isNullOrBlank()) {
             conversationIdInput
         } else {
-            "conv-" + UUID.randomUUID().toString().take(8)
+            createConversation()
         }
 
         val now = System.currentTimeMillis()
@@ -60,7 +80,6 @@ class ConversationHistoryStore {
                     updatedAt = now
                 )
             } else {
-                // 기존 대화 제목이 '신규 리서치 대화'인 경우 실제 질문 텍스트로 1차 갱신
                 val updatedTitle = if (existing.title.startsWith("신규 리서치 대화") && !query.isNullOrBlank()) {
                     formattedTitle
                 } else existing.title
@@ -75,11 +94,10 @@ class ConversationHistoryStore {
     /**
      * 카프카/Redis로 전달받은 스트리밍 이벤트를 축적하고, DONE 스트림 완결 시점에 1회 일괄 저장 및 LLM 스마트 타이틀 갱신을 실행합니다.
      */
-    fun appendEvent(event: AgentResponseEvent) {
+    fun appendEvent(event: AgentEvent) {
         val conversationId = event.conversationId
         if (conversationId.isBlank()) return
 
-        // 1. 이벤트 유형별 스트림 축적
         when (event.type) {
             "STATUS" -> {
                 timelineEventsMap.computeIfAbsent(conversationId) { CopyOnWriteArrayList() }.add(event)
@@ -91,9 +109,8 @@ class ConversationHistoryStore {
                 a2uiPayloadMap[conversationId] = event.content
             }
             "DONE" -> {
-                // 2. [스트림 완결 DONE 시점] 1회 일괄 저장(Batch Persistence) & 스마트 타이틀 1회 확정 갱신!
                 val now = System.currentTimeMillis()
-                val smartTitle = event.metadata.title
+                val smartTitle = (event.metadata["title"] as? String) ?: ""
 
                 conversations[conversationId]?.let { existing ->
                     val finalTitle = if (smartTitle.isNotBlank()) smartTitle else existing.title
@@ -124,7 +141,7 @@ class ConversationHistoryStore {
     }
 
     /**
-     * 특정 대화의 상세 타임라인 및 완결된 마크다운 보고서를 조회합니다. (새로고침 복원 & 상세 조회용)
+     * 특정 대화의 상세 타임라인 및 완결된 마크다운 보고서를 조회합니다.
      */
     fun getConversationDetail(conversationId: String): ConversationDetailDto? {
         val summary = conversations[conversationId] ?: return null

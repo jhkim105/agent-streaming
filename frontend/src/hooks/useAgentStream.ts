@@ -1,16 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentEvent, ConnectionStatus, StatusLog, A2UIData, ConversationSummary, ConversationDetail } from '../types/agent';
 
-const STREAM_URL = '/api/chat/stream';
-const MESSAGE_URL = '/api/chat/message';
-const ACTION_URL = '/api/chat/action';
-const CONVERSATIONS_URL = '/api/chat/conversations';
-
+const CONVERSATIONS_URL = '/api/conversations';
 const CONVERSATION_STORAGE_KEY = 'agent_streaming_current_conversation_id';
 const LAST_EVENT_ID_KEY = 'agent_streaming_last_event_id';
 
 export function useAgentStream() {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(() => {
     return localStorage.getItem(CONVERSATION_STORAGE_KEY) || null;
   });
@@ -27,8 +23,9 @@ export function useAgentStream() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
   const lastEventIdRef = useRef<string | null>(localStorage.getItem(LAST_EVENT_ID_KEY));
+  const connectionIdRef = useRef<string | null>(null);
 
-  // 이전 대화 요약 목록 조회 API 호출 (GET /api/chat/conversations)
+  // 이전 대화 요약 목록 조회 API 호출 (GET /api/conversations)
   const fetchConversations = useCallback(async () => {
     try {
       const res = await fetch(CONVERSATIONS_URL);
@@ -41,7 +38,7 @@ export function useAgentStream() {
     }
   }, []);
 
-  // 특정 대화 상세 복원 및 화면 전환 (GET /api/chat/conversations/{id})
+  // 특정 대화 상세 복원 및 화면 전환 (GET /api/conversations/{id})
   const selectConversation = useCallback(async (targetConvId: string) => {
     try {
       setErrorMsg(null);
@@ -55,7 +52,7 @@ export function useAgentStream() {
 
         // 타임라인 상태 로그 복원
         const restoredLogs: StatusLog[] = detail.timelineEvents.map((evt) => ({
-          id: Math.random().toString(36).substring(2, 9),
+          id: evt.eventId || Math.random().toString(36).substring(2, 9),
           step: evt.metadata?.step || 'thinking',
           content: evt.content,
           timestamp: evt.metadata?.timestamp || Date.now()
@@ -85,24 +82,40 @@ export function useAgentStream() {
     }
   }, []);
 
-  // SSE 커넥션 수립 함수 (ADR 0003: conversationId 및 Last-Event-ID 지원)
-  const connectSSE = useCallback(() => {
+  // 명시적 신규 대화 스레드 생성 (POST /api/conversations)
+  const createNewConversation = useCallback(async (): Promise<string> => {
+    try {
+      const res = await fetch(CONVERSATIONS_URL, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const newConvId = data.conversationId;
+        setConversationId(newConvId);
+        localStorage.setItem(CONVERSATION_STORAGE_KEY, newConvId);
+        return newConvId;
+      }
+    } catch (err) {
+      console.error('[Create Conversation Error]', err);
+    }
+    const fallbackId = 'conv-' + Math.random().toString(36).substring(2, 10);
+    setConversationId(fallbackId);
+    localStorage.setItem(CONVERSATION_STORAGE_KEY, fallbackId);
+    return fallbackId;
+  }, []);
+
+  // SSE 커넥션 수립 함수 (GET /api/conversations/{id}/events)
+  const connectSSE = useCallback(async (targetConvId?: string) => {
     if (eventSourceRef.current) return;
 
+    let convId = targetConvId || localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (!convId) {
+      convId = await createNewConversation();
+    }
+
     setConnectionStatus('CONNECTING');
-    
-    const savedConvId = localStorage.getItem(CONVERSATION_STORAGE_KEY);
-    const savedLastEventId = lastEventIdRef.current;
 
-    const queryParams: string[] = [];
-    if (savedConvId) queryParams.push(`conversationId=${encodeURIComponent(savedConvId)}`);
-    if (savedLastEventId) queryParams.push(`lastEventId=${encodeURIComponent(savedLastEventId)}`);
+    const streamUrl = `${CONVERSATIONS_URL}/${encodeURIComponent(convId)}/events`;
 
-    const url = queryParams.length > 0
-      ? `${STREAM_URL}?${queryParams.join('&')}`
-      : STREAM_URL;
-
-    const es = new EventSource(url);
+    const es = new EventSource(streamUrl);
     eventSourceRef.current = es;
 
     es.onopen = () => {
@@ -110,18 +123,20 @@ export function useAgentStream() {
       setErrorMsg(null);
     };
 
-    // 1. INIT 이벤트 (Session ID 및 Conversation ID 수신)
+    // 1. INIT 이벤트 (connectionId 및 conversationId 수신)
     es.addEventListener('INIT', (event) => {
       try {
         const data: AgentEvent = JSON.parse(event.data);
-        if (data.sessionId) {
-          setSessionId(data.sessionId);
+        const connId = data.metadata?.connectionId || null;
+        if (connId) {
+          setConnectionId(connId);
+          connectionIdRef.current = connId;
         }
         if (data.conversationId) {
           setConversationId(data.conversationId);
           localStorage.setItem(CONVERSATION_STORAGE_KEY, data.conversationId);
         }
-        console.log('[SSE INIT] Session:', data.sessionId, 'Conv:', data.conversationId);
+        console.log('[SSE INIT] ConnectionId:', connId, 'Conv:', data.conversationId);
       } catch (err) {
         console.error('[SSE INIT ERROR]', err);
       }
@@ -136,7 +151,7 @@ export function useAgentStream() {
         }
         const data: AgentEvent = JSON.parse(event.data);
         const newLog: StatusLog = {
-          id: Math.random().toString(36).substring(2, 9),
+          id: data.eventId || Math.random().toString(36).substring(2, 9),
           step: data.metadata?.step || 'thinking',
           content: data.content,
           timestamp: data.metadata?.timestamp || Date.now()
@@ -147,7 +162,7 @@ export function useAgentStream() {
       }
     });
 
-    // 3. CHUNK 이벤트 (마크다운 타자기 토큰 누적 및 W3C Last-Event-ID 기록)
+    // 3. CHUNK 이벤트 (마크다운 타자기 토큰 누적)
     es.addEventListener('CHUNK', (event) => {
       try {
         if (event.lastEventId) {
@@ -173,14 +188,14 @@ export function useAgentStream() {
       }
     });
 
-    // 5. DONE 이벤트 (리서치 완결 시 1회 완결 스마트 타이틀 적용 및 히스토리 목록 갱신)
+    // 5. DONE 이벤트
     es.addEventListener('DONE', () => {
       setIsResearching(false);
       console.log('[SSE DONE] Research report stream completed');
       fetchConversations();
     });
 
-    // 6. ERROR 이벤트 (에러 발생)
+    // 6. ERROR 이벤트
     es.addEventListener('ERROR', (event: MessageEvent) => {
       try {
         if (event.data) {
@@ -193,7 +208,6 @@ export function useAgentStream() {
       setIsResearching(false);
     });
 
-    // ADR 0003: onerror 시 지연 재연결 시도
     es.onerror = () => {
       setConnectionStatus('ERROR');
       if (eventSourceRef.current) {
@@ -208,7 +222,7 @@ export function useAgentStream() {
         }, 3000);
       }
     };
-  }, [fetchConversations]);
+  }, [createNewConversation, fetchConversations]);
 
   useEffect(() => {
     connectSSE();
@@ -226,11 +240,10 @@ export function useAgentStream() {
   }, [connectSSE, fetchConversations]);
 
   // 신규 대화 시작 함수
-  const startNewConversation = () => {
+  const startNewConversation = async () => {
     localStorage.removeItem(CONVERSATION_STORAGE_KEY);
     localStorage.removeItem(LAST_EVENT_ID_KEY);
     lastEventIdRef.current = null;
-    setConversationId(null);
     setStatusLogs([]);
     setReportMarkdown('');
     setA2uiData(null);
@@ -241,16 +254,20 @@ export function useAgentStream() {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-    connectSSE();
+    const newConvId = await createNewConversation();
+    connectSSE(newConvId);
   };
 
-  // 질문 전송 함수 (POST /api/chat/message)
+  // AgentCommand 제출 함수 (POST /api/conversations/{id}/commands)
   const submitQuery = async (queryText: string) => {
     if (!queryText.trim()) return;
-    if (!sessionId) {
-      setErrorMsg('SSE 세션이 아직 연결되지 않았습니다. 잠시 후 다시 시도해 주세요.');
-      return;
+    
+    let activeConvId = conversationId || localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (!activeConvId) {
+      activeConvId = await createNewConversation();
     }
+
+    const currentConnId = connectionIdRef.current || connectionId;
 
     // 초기화
     setStatusLogs([]);
@@ -260,15 +277,17 @@ export function useAgentStream() {
     setIsResearching(true);
 
     try {
-      const response = await fetch(MESSAGE_URL, {
+      const response = await fetch(`${CONVERSATIONS_URL}/${encodeURIComponent(activeConvId)}/commands`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          sessionId: sessionId,
-          conversationId: conversationId || '',
-          query: queryText
+          connectionId: currentConnId || '',
+          type: 'RESEARCH',
+          payload: {
+            query: queryText
+          }
         })
       });
 
@@ -290,27 +309,32 @@ export function useAgentStream() {
     }
   };
 
-  // 사용자 A2UI 액션 버튼 클릭 전송 함수 (POST /api/chat/action)
+  // 사용자 A2UI 액션 커맨드 제출 함수 (POST /api/conversations/{id}/commands)
   const sendUserAction = async (actionId: string, payload: Record<string, any>) => {
-    if (!sessionId) {
-      setErrorMsg('SSE 세션이 연결되어 있지 않습니다.');
+    const activeConvId = conversationId || localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (!activeConvId) {
+      setErrorMsg('대화가 시작되지 않았습니다.');
       return;
     }
+
+    const currentConnId = connectionIdRef.current || connectionId;
 
     setIsResearching(true);
     setErrorMsg(null);
 
     try {
-      const response = await fetch(ACTION_URL, {
+      const response = await fetch(`${CONVERSATIONS_URL}/${encodeURIComponent(activeConvId)}/commands`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          sessionId,
-          conversationId: conversationId || '',
-          actionId,
-          payload
+          connectionId: currentConnId || '',
+          type: 'ACTION',
+          payload: {
+            actionId,
+            ...payload
+          }
         })
       });
 
@@ -325,7 +349,7 @@ export function useAgentStream() {
   };
 
   return {
-    sessionId,
+    connectionId,
     conversationId,
     connectionStatus,
     statusLogs,

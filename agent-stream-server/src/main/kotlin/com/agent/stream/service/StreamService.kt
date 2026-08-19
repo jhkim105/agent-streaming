@@ -1,7 +1,8 @@
 package com.agent.stream.service
 
-import com.agent.stream.dto.AgentResponseEvent
-import com.agent.stream.session.RedisSessionRegistry
+import com.agent.stream.dto.AgentCommand
+import com.agent.stream.dto.AgentEvent
+import com.agent.stream.session.RedisConnectionRegistry
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -16,98 +17,112 @@ private val logger = KotlinLogging.logger {}
 class StreamService(
     private val kafkaTemplate: KafkaTemplate<String, String>,
     private val sessionRegistry: SessionRegistry,
-    private val redisSessionRegistry: RedisSessionRegistry,
+    private val redisConnectionRegistry: RedisConnectionRegistry,
     private val redisStreamRoutingService: RedisStreamRoutingService,
     private val conversationHistoryStore: ConversationHistoryStore,
     private val hostId: String,
     private val objectMapper: ObjectMapper
 ) {
-    @Value("\${app.kafka.topic-requests:agent-requests}")
-    private lateinit var topicRequests: String
+    @Value("\${app.kafka.topic-commands:agent-commands}")
+    private lateinit var topicCommands: String
 
     /**
-     * 질문을 conversationId 및 Session ID와 함께 카프카 요청 토픽으로 전송합니다. (hostId 미고정 - ADR 0003)
+     * AgentCommand를 등록하고 Redis에 commandId -> connectionId 매핑 저장 후 카프카 커맨드 토픽으로 전송합니다.
      */
-    fun sendUserQuery(sessionId: String, conversationId: String, query: String) {
-        // 대화 스레드 저장소에 질문 등록 및 초기화
-        val validConvId = conversationHistoryStore.getOrCreateConversation(conversationId, query)
-
-        val payload = mapOf(
-            "sessionId" to sessionId,
-            "conversationId" to validConvId,
-            "query" to query
+    fun submitCommand(command: AgentCommand): String {
+        val validConvId = conversationHistoryStore.getOrCreateConversation(
+            command.conversationId,
+            command.payload["query"] as? String
         )
-        val jsonPayload = objectMapper.writeValueAsString(payload)
 
-        logger.info { "Kafka 요청 토픽 전송 ($topicRequests - ADR 0003): conversationId=$validConvId, sessionId=$sessionId" }
-        kafkaTemplate.send(topicRequests, sessionId, jsonPayload)
+        val finalCommand = command.copy(
+            conversationId = validConvId,
+            timestamp = System.currentTimeMillis()
+        )
+
+        // 1. Redis에 commandId -> connectionId 매핑 등록
+        if (finalCommand.connectionId.isNotBlank()) {
+            redisConnectionRegistry.registerCommandConnection(finalCommand.commandId, finalCommand.connectionId).subscribe()
+        }
+
+        // 2. Kafka 커맨드 토픽으로 발행
+        val payloadMap = mapOf(
+            "commandId" to finalCommand.commandId,
+            "conversationId" to finalCommand.conversationId,
+            "connectionId" to finalCommand.connectionId,
+            "hostId" to hostId,
+            "type" to finalCommand.type,
+            "payload" to finalCommand.payload,
+            "timestamp" to finalCommand.timestamp
+        )
+        val jsonPayload = objectMapper.writeValueAsString(payloadMap)
+
+        logger.info { "Kafka 커맨드 토픽 전송 ($topicCommands): commandId=${finalCommand.commandId}, conversationId=$validConvId, connectionId=${finalCommand.connectionId}" }
+        kafkaTemplate.send(topicCommands, finalCommand.commandId, jsonPayload)
+
+        return finalCommand.commandId
     }
 
     /**
-     * 사용자의 A2UI 액션을 conversationId 및 Session ID와 함께 카프카 요청 토픽으로 전송합니다.
+     * AgentEvent 수신 시 commandId -> connectionId -> hostId 다단계 동적 매핑 조회 후
+     * 본인 노드 소켓 직통 배달 또는 타 노드 Redis Stream 릴레이를 수행합니다.
      */
-    fun sendUserAction(sessionId: String, conversationId: String, actionId: String, payload: Map<String, Any>) {
-        val validConvId = conversationHistoryStore.getOrCreateConversation(conversationId)
-
-        val messagePayload = mapOf(
-            "sessionId" to sessionId,
-            "conversationId" to validConvId,
-            "query" to "A2UI_ACTION:$actionId",
-            "actionId" to actionId,
-            "payload" to payload
-        )
-        val jsonPayload = objectMapper.writeValueAsString(messagePayload)
-
-        logger.info { "Kafka A2UI Action 전송 ($topicRequests): conversationId=$validConvId, sessionId=$sessionId, actionId=$actionId" }
-        kafkaTemplate.send(topicRequests, sessionId, jsonPayload)
-    }
-
-    /**
-     * ADR 0003 컨슈머 시점 동적 세션 위치 조회:
-     * Kafka 수신 메시지를 처리할 때 매 순간 Redis에서 해당 sessionId의 실재 소켓 노드(targetHostId)를 동적으로 조회하여 릴레이합니다.
-     */
-    fun handleAgentResponse(event: AgentResponseEvent) {
+    fun handleAgentEvent(event: AgentEvent) {
         // 1. 대화 이력 저장소에 실시간 이벤트 축적
         conversationHistoryStore.appendEvent(event)
 
-        // 2. 컨슈머 시점 동적 세션 위치 조회 (RedisSessionRegistry)
-        redisSessionRegistry.getSessionHost(event.sessionId)
-            .defaultIfEmpty(event.hostId.ifBlank { hostId })
-            .subscribe({ targetHostId ->
-                if (targetHostId == hostId) {
-                    // 본인 노드인 경우: 직통 local SSE 소켓으로 배달
-                    logger.debug { "본인 노드 메시지 직통 배달 (hostId=$hostId): conversationId=${event.conversationId}, sessionId=${event.sessionId}" }
-                    dispatchToLocalClient(event)
-                } else {
-                    // 타 노드인 경우: Redis Streams (stream:host:{targetHostId})를 통해 무유실 릴레이 (ADR 0003)
-                    logger.info { "타 노드 메시지 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): conversationId=${event.conversationId}, sessionId=${event.sessionId}" }
-                    redisStreamRoutingService.publishToTargetStream(targetHostId, event.copy(hostId = targetHostId)).subscribe()
+        // 2. commandId로 해당 명령을 보낸 connectionId 동적 조회
+        redisConnectionRegistry.getConnectionByCommand(event.commandId)
+            .defaultIfEmpty("")
+            .flatMap { targetConnectionId ->
+                if (targetConnectionId.isBlank()) {
+                    // connectionId를 직접 못 찾은 경우 본인 노드 또는 event에 명시된 소켓으로 직통
+                    logger.debug { "commandId에 매핑된 connectionId 없음: commandId=${event.commandId}" }
+                    dispatchToLocalClient(event, "")
+                    return@flatMap reactor.core.publisher.Mono.empty<Void>()
                 }
-            }, { err ->
-                logger.error(err) { "세션 위치 동적 조회 중 오류 발생: sessionId=${event.sessionId}" }
-                dispatchToLocalClient(event)
+
+                // 3. connectionId로 해당 소켓이 위치한 타깃 서버 노드(targetHostId) 동적 조회
+                redisConnectionRegistry.getConnectionHost(targetConnectionId)
+                    .defaultIfEmpty(event.hostId.ifBlank { hostId })
+                    .doOnNext { targetHostId ->
+                        if (targetHostId == hostId) {
+                            // 본인 노드인 경우 직통 배달
+                            logger.debug { "본인 노드 소켓 직통 배달 (hostId=$hostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
+                            dispatchToLocalClient(event, targetConnectionId)
+                        } else {
+                            // 타 노드인 경우 Redis Streams XADD 릴레이 (targetConnectionId 포함)
+                            logger.info { "타 노드 소켓 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
+                            redisStreamRoutingService.publishToTargetStream(targetHostId, targetConnectionId, event).subscribe()
+                        }
+                    }
+                    .then()
+            }
+            .subscribe({}, { err ->
+                logger.error(err) { "동적 연결 위치 조회 중 오류 발생: commandId=${event.commandId}" }
             })
     }
 
     /**
      * local SSE SendChannel 세션에 이벤트를 전송합니다.
      */
-    fun dispatchToLocalClient(event: AgentResponseEvent) {
-        val channel = sessionRegistry.getChannel(event.sessionId)
+    fun dispatchToLocalClient(event: AgentEvent, connectionId: String) {
+        val channel = sessionRegistry.getChannel(connectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
+                .id(event.eventId)
                 .event(event.type)
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
             val result = channel.trySend(sseEvent)
             if (result.isSuccess) {
-                logger.debug { "Client SSE 배달 성공: type=${event.type}, sessionId=${event.sessionId}" }
+                logger.debug { "Client SSE 배달 성공: type=${event.type}, connectionId=$connectionId" }
             } else {
-                logger.warn { "Client SSE 배달 실패 (Channel full or closed): sessionId=${event.sessionId}" }
+                logger.warn { "Client SSE 배달 실패 (Channel full or closed): connectionId=$connectionId" }
             }
         } else {
-            logger.debug { "해당 sessionId의 로컬 세션을 찾을 수 없음 (새로고침 또는 닫힘): sessionId=${event.sessionId}" }
+            logger.debug { "해당 connectionId의 로컬 세션을 찾을 수 없음: connectionId=$connectionId" }
         }
     }
 }

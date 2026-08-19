@@ -8,7 +8,7 @@ import './App.css';
 
 export function App() {
   const {
-    sessionId,
+    connectionId,
     conversationId,
     connectionStatus,
     statusLogs,
@@ -35,7 +35,7 @@ export function App() {
           <div>
             <h1 className="brand-title">Real-time AI Researcher</h1>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-              {conversationId ? `Conv: ${conversationId}` : (sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Connecting session...')}
+              {conversationId ? `Conv: ${conversationId}` : (connectionId ? `Conn: ${connectionId.slice(0, 12)}...` : 'Connecting session...')}
             </span>
           </div>
         </div>
@@ -72,7 +72,7 @@ export function App() {
               {connectionStatus === 'ERROR' && '연결 오류'}
             </span>
             {connectionStatus === 'ERROR' && (
-              <button onClick={reconnect} style={{ background: 'none', color: 'var(--accent-cyan)', marginLeft: '4px' }}>
+              <button onClick={() => reconnect()} style={{ background: 'none', color: 'var(--accent-cyan)', marginLeft: '4px' }}>
                 <RefreshCw size={14} />
               </button>
             )}

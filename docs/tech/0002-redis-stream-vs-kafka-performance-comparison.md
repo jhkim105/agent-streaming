@@ -1,7 +1,7 @@
 # Redis Stream vs Kafka 성능 및 특성 비교
 
 * **작성일 (Date)**: 2026-08-08
-* **관련 문서**: [ADR 0003 버킷팅 라우팅](../adr/0003-redis-streams-bucketing-and-dynamic-session-routing.md) | [시스템 아키텍처](../2.architecture.md)
+* **관련 문서**: [ADR 0003 버킷팅 라우팅](../adr/0003-redis-streams-bucketing-and-dynamic-session-routing.md) | [시스템 아키텍처](../architecture.md)
 
 ---
 

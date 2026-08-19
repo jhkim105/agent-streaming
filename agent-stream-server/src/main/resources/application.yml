@@ -23,5 +23,7 @@ spring:
 
 app:
   kafka:
-    topic-requests: agent-requests
-    topic-responses: agent-responses
+    topic-commands: agent-commands
+    topic-events: agent-events
+    topic-requests: agent-commands
+    topic-responses: agent-events

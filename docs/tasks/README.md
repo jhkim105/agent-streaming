@@ -2,7 +2,7 @@
 
 이 문서는 실시간 AI 리서처 에이전트(Real-time AI Researcher Agent) 개발 작업을 Phase별 세부 Task 단위로 나눈 작업 트래킹 대시보드입니다.
 
-관련 문서: [요구사항 정의서](../1.requirements.md) | [시스템 아키텍처](../2.architecture.md) | [기술 명세서](../3.spec.md) | [구현 계획서](../4.plan.md)
+관련 문서: [요구사항 정의서](../requirements.md) | [시스템 아키텍처](../architecture.md) | [기술 명세서](../spec.md) | [구현 계획서](../plan.md)
 
 ---
 
@@ -61,7 +61,7 @@
 - [x] Task 5.5: 첫 단어 응답시간(TTFT) 프로파일링 및 튜닝 (1.2초 달성)
 
 ### [Phase 6: A2UI 선언적 UI 및 양방향 피드백 연동](phase6-a2ui-integration.md)
-- [x] Task 6.1: A2UI 이벤트 데이터 스키마 및 REST API 명세 확장 (`3.spec.md`)
+- [x] Task 6.1: A2UI 이벤트 데이터 스키마 및 REST API 명세 확장 (`spec.md`)
 - [x] Task 6.2: Kotlin Stream Server 내 `POST /api/chat/action` 및 Kafka 프로듀싱 연동
 - [x] Task 6.3: Python Worker 내 `a2ui_schema.py` Pydantic 빌더 및 `a2ui_generation` 노드 개발
 - [x] Task 6.4: React FE 내 `A2UIRenderer.tsx` 대시보드 컴포넌트 및 `sendUserAction` 피드백 구현

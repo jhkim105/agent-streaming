@@ -6,15 +6,26 @@ export interface EventMetadata {
   step?: string;
   title?: string;
   timestamp?: number;
+  connectionId?: string;
 }
 
 export interface AgentEvent {
-  sessionId: string;
+  eventId: string;
+  commandId?: string;
   conversationId?: string;
-  hostId: string;
+  hostId?: string;
   type: EventType;
   content: string;
   metadata?: EventMetadata;
+  timestamp?: number;
+}
+
+export interface AgentCommand {
+  commandId?: string;
+  conversationId?: string;
+  connectionId?: string;
+  type: 'RESEARCH' | 'ACTION' | 'CANCEL';
+  payload: Record<string, any>;
 }
 
 export interface StatusLog {

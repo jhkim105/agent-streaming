@@ -5,7 +5,7 @@
   * Spring Boot 3.3.2 및 Kotlin Idioms 준수
   * Slf4j 대신 **`kotlin-logging`** (7.0.0) 로깅 표준 사용
   * JUnit 대신 **`kotest`** BDD 스타일 테스트 작성
-* **관련 문서**: [기술 명세서](../3.spec.md) | [마스터 체크리스트](README.md)
+* **관련 문서**: [기술 명세서](../spec.md) | [마스터 체크리스트](README.md)
 
 ---
 
