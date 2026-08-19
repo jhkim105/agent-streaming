@@ -20,9 +20,9 @@ class ResearchState(TypedDict):
     """
     LangGraph 흐름 속에서 각 노드 간에 전달되고 공유되는 상태 데이터 클래스입니다.
     """
-    session_id: str                      # 사용자 세션 유니크 UUID
-    conversation_id: str                 # 비즈니스 리서치 대화 식별자
-    host_id: str                         # 타겟 게이트웨이 인스턴스 ID
+    command_id: str                      # 사용자 커맨드 유니크 ID (commandId)
+    conversation_id: str                 # 비즈니스 리서치 대화 식별자 (conversationId)
+    host_id: str                         # 타겟 게이트웨이 인스턴스 ID (hostId)
     query: str                           # 사용자 질문 원본
     search_query: str                    # 정제된 순수 검색 키워드
     category: str                        # 질문 분류 카테고리 ('tech', 'business', 'general')
@@ -39,7 +39,7 @@ class AgentWorkflowEngine:
     멀티 스텝 실시간 AI 리서치 그래프를 실행하는 핵심 엔진 클래스입니다.
     """
     def __init__(self, kafka_producer: AgentKafkaProducer):
-        # 파이썬 에이전트가 각 단계마다 카프카 응답을 송신할 프로듀서 인스턴스를 주입합니다.
+        # 파이썬 에이전트가 각 단계마다 카프카 이벤트를 송신할 프로듀서 인스턴스를 주입합니다.
         self.producer = kafka_producer
         # 로컬 Ollama LLM 통신 클라이언트를 초기화합니다.
         self.llm_client = OllamaLLMClient(base_url=OLLAMA_BASE_URL, model_name=OLLAMA_MODEL)
@@ -50,7 +50,6 @@ class AgentWorkflowEngine:
         """
         LangGraph 그래프의 노드(Node)와 간선(Edge)을 등록하고 컴파일합니다.
         """
-        # ResearchState 형태의 데이터 구조를 공유하는 그래프 객체를 생성합니다.
         builder = StateGraph(ResearchState)
 
         # 1. 노드 등록 (각 추론 단계를 담당하는 파이썬 함수 등록)
@@ -74,9 +73,8 @@ class AgentWorkflowEngine:
     def _node_query_analysis(self, state: ResearchState) -> Dict[str, Any]:
         """
         [1단계 노드] 사용자의 질문을 분석하여 카테고리(기술/비즈니스/일반)를 분류합니다.
-        (스트리밍 진행 중에는 타이틀을 생성하지 않음 - 완결 DONE 시점에 1회 생성!)
         """
-        session_id = state["session_id"]
+        command_id = state["command_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -117,9 +115,9 @@ class AgentWorkflowEngine:
         # 정제된 순수 검색어 생성
         search_query = " ".join(extracted_keywords) if extracted_keywords else query
 
-        # Kafka로 분석 시작 및 완료 알림 전송 (title 미포함)
+        # Kafka로 분석 시작 및 완료 알림 전송 (command_id 전달)
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
@@ -129,7 +127,7 @@ class AgentWorkflowEngine:
         time.sleep(0.2)
 
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
@@ -146,15 +144,15 @@ class AgentWorkflowEngine:
 
     def _node_web_search(self, state: ResearchState) -> Dict[str, Any]:
         """
-        [2단계 노드] 정제된 pure 검색어(예: 'LiteLLM')를 사용해 DuckDuckGo 웹 조회를 실행합니다.
+        [2단계 노드] 정제된 pure 검색어를 사용해 DuckDuckGo 웹 조회를 실행합니다.
         """
-        session_id = state["session_id"]
+        command_id = state["command_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         search_query = state.get("search_query", state["query"])
 
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
@@ -165,7 +163,7 @@ class AgentWorkflowEngine:
         results = search_web_duckduckgo(query=search_query, max_results=4)
 
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
@@ -180,7 +178,7 @@ class AgentWorkflowEngine:
         """
         [3단계 노드] 검색된 URL들의 본문 콘텐츠를 읽어옵니다.
         """
-        session_id = state["session_id"]
+        command_id = state["command_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         results = state.get("search_results", [])
@@ -194,7 +192,7 @@ class AgentWorkflowEngine:
                 continue
 
             self.producer.send_event(
-                session_id=session_id,
+                command_id=command_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
@@ -212,10 +210,10 @@ class AgentWorkflowEngine:
 
     def _node_report_generation(self, state: ResearchState) -> Dict[str, Any]:
         """
-        [4단계 노드] 수집된 실시간 웹 데이터와 사용자 질문을 로컬 Ollama (Qwen2.5-7B) 모델에 전달하고,
+        [4단계 노드] 수집된 데이터와 사용자 질문을 로컬 Ollama 모델에 전달하고, 
         LLM이 직접 생성하는 자연어 토큰을 Kafka로 실시간 타자기 스트리밍 송신합니다.
         """
-        session_id = state["session_id"]
+        command_id = state["command_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -229,7 +227,7 @@ class AgentWorkflowEngine:
 
         if is_ollama_online:
             self.producer.send_event(
-                session_id=session_id,
+                command_id=command_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
@@ -238,7 +236,7 @@ class AgentWorkflowEngine:
             )
         else:
             self.producer.send_event(
-                session_id=session_id,
+                command_id=command_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="STATUS",
@@ -261,9 +259,7 @@ class AgentWorkflowEngine:
 
         full_report_text = ""
 
-        # ----------------------------------------------------
         # 1. Ollama (Qwen2.5-7B) 모델 연동 자연어 토큰 스트리밍
-        # ----------------------------------------------------
         if is_ollama_online:
             system_prompt = f"""너는 실시간 AI 리서치 분석 전문가 (Real-time AI Research Agent)이다.
 제공된 [실시간 웹 검색 수집 데이터]를 정밀하게 분석하여 사용자의 질문에 답변하는 고품질 마크다운 리포트를 작성하라.
@@ -295,7 +291,7 @@ class AgentWorkflowEngine:
             for token in token_generator:
                 full_report_text += token
                 self.producer.send_event(
-                    session_id=session_id,
+                    command_id=command_id,
                     conversation_id=conversation_id,
                     host_id=host_id,
                     event_type="CHUNK",
@@ -303,9 +299,7 @@ class AgentWorkflowEngine:
                     step="report_generation"
                 )
 
-        # ----------------------------------------------------
         # 2. Ollama 미실행 시 Fallback 룰 기반 스트리밍
-        # ----------------------------------------------------
         else:
             fallback_md = f"""# 📊 {category.upper()} 분야 실시간 데이터 리서치 보고서
 
@@ -327,7 +321,7 @@ class AgentWorkflowEngine:
                 full_report_text += chunk_str
 
                 self.producer.send_event(
-                    session_id=session_id,
+                    command_id=command_id,
                     conversation_id=conversation_id,
                     host_id=host_id,
                     event_type="CHUNK",
@@ -340,10 +334,9 @@ class AgentWorkflowEngine:
 
     def _node_a2ui_generation(self, state: ResearchState) -> Dict[str, Any]:
         """
-        [5단계 노드] A2UI UI 대시보드 스키마를 전송하고, 
-        완성된 리포트와 질문 문맥을 종합 분석하여 딱 1회 최상 품질의 스마트 대화 타이틀(smart_title)을 생성해 DONE 완결 알림으로 송신합니다.
+        [5단계 노드] A2UI UI 대시보드 스키마를 전송하고 완료 이벤트(DONE)를 송신합니다.
         """
-        session_id = state["session_id"]
+        command_id = state["command_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -353,7 +346,7 @@ class AgentWorkflowEngine:
 
         # A2UI 상태 메시지 송신
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="STATUS",
@@ -384,7 +377,7 @@ class AgentWorkflowEngine:
 
         # Kafka로 A2UI_RENDER 이벤트 송신
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="A2UI_RENDER",
@@ -392,9 +385,7 @@ class AgentWorkflowEngine:
             step="a2ui_generation"
         )
 
-        # ----------------------------------------------------------------------
-        # [핵심] 리서치 완결 시점에 단 1회 최상 품질의 스마트 대화 타이틀(smart_title) 1회 생성!
-        # ----------------------------------------------------------------------
+        # 스마트 타이틀 생성
         prefix_emoji = "🌱 " if category == "tech" else ("📈 " if category == "business" else "💡 ")
         raw_summary = " ".join(extracted_keywords[:3]) if extracted_keywords else query
         if len(raw_summary) > 14:
@@ -402,9 +393,9 @@ class AgentWorkflowEngine:
 
         smart_title = f"{prefix_emoji}{raw_summary}"
 
-        # 최종 작업 완결 알림 신호(DONE) 송신 (스마트 타이틀 1회 전달!)
+        # 최종 작업 완결 알림 신호(DONE) 송신
         self.producer.send_event(
-            session_id=session_id,
+            command_id=command_id,
             conversation_id=conversation_id,
             host_id=host_id,
             event_type="DONE",
@@ -415,12 +406,12 @@ class AgentWorkflowEngine:
 
         return {"smart_title": smart_title}
 
-    def execute(self, session_id: str, host_id: str, query: str, conversation_id: str = "") -> None:
+    def execute(self, command_id: str, host_id: str, query: str, conversation_id: str = "") -> None:
         """
         초기 상태 객체를 세팅하고 LangGraph 에이전트 추론 루프를 실행하는 메인 진입점 함수입니다.
         """
         initial_state: ResearchState = {
-            "session_id": session_id,
+            "command_id": command_id,
             "conversation_id": conversation_id,
             "host_id": host_id,
             "query": query,
@@ -439,7 +430,7 @@ class AgentWorkflowEngine:
         except Exception as e:
             print(f"[AgentEngine ERROR] 그래프 실행 중 예외 발생: {e}")
             self.producer.send_event(
-                session_id=session_id,
+                command_id=command_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
                 event_type="ERROR",

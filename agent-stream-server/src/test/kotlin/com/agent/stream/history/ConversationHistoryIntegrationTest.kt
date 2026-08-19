@@ -1,7 +1,6 @@
 package com.agent.stream.history
 
-import com.agent.stream.dto.AgentResponseEvent
-import com.agent.stream.dto.EventMetadata
+import com.agent.stream.dto.AgentEvent
 import com.agent.stream.service.ConversationHistoryStore
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
@@ -32,24 +31,24 @@ class ConversationHistoryIntegrationTest : BehaviorSpec({
 
             `when`("스트리밍 도중 STATUS 및 CHUNK 이벤트가 발생할 때는 타이틀을 변경하지 않다가") {
                 historyStore.appendEvent(
-                    AgentResponseEvent(
-                        sessionId = "sse-session-1",
+                    AgentEvent(
+                        commandId = "cmd-1",
                         conversationId = conversationId,
                         hostId = "kotlin-node-1",
                         type = "STATUS",
                         content = "🔍 질문 의도 분석 중...",
-                        metadata = EventMetadata(step = "query_analysis")
+                        metadata = mapOf("step" to "query_analysis")
                     )
                 )
 
                 historyStore.appendEvent(
-                    AgentResponseEvent(
-                        sessionId = "sse-session-1",
+                    AgentEvent(
+                        commandId = "cmd-1",
                         conversationId = conversationId,
                         hostId = "kotlin-node-1",
                         type = "CHUNK",
                         content = "# 📊 Spring Boot & Kotlin 리포트\n\n내용...",
-                        metadata = EventMetadata(step = "report_generation")
+                        metadata = mapOf("step" to "report_generation")
                     )
                 )
 
@@ -57,13 +56,13 @@ class ConversationHistoryIntegrationTest : BehaviorSpec({
                     val finalSmartTitle = "🌱 Spring Boot & Kotlin 동향"
 
                     historyStore.appendEvent(
-                        AgentResponseEvent(
-                            sessionId = "sse-session-1",
+                        AgentEvent(
+                            commandId = "cmd-1",
                             conversationId = conversationId,
                             hostId = "kotlin-node-1",
                             type = "DONE",
                             content = "[TECH] 리포트 작성 완결",
-                            metadata = EventMetadata(step = "completed", title = finalSmartTitle)
+                            metadata = mapOf("step" to "completed", "title" to finalSmartTitle)
                         )
                     )
 

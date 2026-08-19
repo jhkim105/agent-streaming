@@ -1,11 +1,10 @@
 package com.agent.stream.routing
 
-import com.agent.stream.dto.AgentResponseEvent
-import com.agent.stream.dto.EventMetadata
+import com.agent.stream.dto.AgentEvent
 import com.agent.stream.service.ConversationHistoryStore
 import com.agent.stream.service.RedisStreamRoutingService
 import com.agent.stream.service.StreamService
-import com.agent.stream.session.RedisSessionRegistry
+import com.agent.stream.session.RedisConnectionRegistry
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -21,7 +20,7 @@ import org.springframework.kafka.core.KafkaTemplate
 import reactor.core.publisher.Mono
 
 /**
- * Kotest BehaviorSpec BDD 스타일로 작성된 다중 노드 세션 라우팅 검증 통합 테스트입니다.
+ * Kotest BehaviorSpec BDD 스타일로 작성된 다중 노드 연결 라우팅 검증 통합 테스트입니다.
  */
 class MultiNodeRoutingIntegrationTest : BehaviorSpec({
 
@@ -42,7 +41,7 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
         @Suppress("UNCHECKED_CAST")
         val fakeKafkaTemplate = mock(KafkaTemplate::class.java) as KafkaTemplate<String, String>
         val mockRedisTemplate = mock(ReactiveStringRedisTemplate::class.java)
-        val mockRedisSessionRegistry = mock(RedisSessionRegistry::class.java)
+        val mockRedisConnectionRegistry = mock(RedisConnectionRegistry::class.java)
 
         val node2RedisStreamRoutingService = object : RedisStreamRoutingService(
             redisTemplate = mockRedisTemplate,
@@ -50,14 +49,15 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
             hostId = node2HostId,
             objectMapper = objectMapper
         ) {
-            override fun publishToTargetStream(targetHostId: String, event: AgentResponseEvent): Mono<String> {
+            override fun publishToTargetStream(targetHostId: String, targetConnectionId: String, event: AgentEvent): Mono<String> {
                 lastPublishedTargetStreamKey = "stream:host:$targetHostId"
                 lastPublishedPayloadJson = objectMapper.writeValueAsString(event)
 
                 if (targetHostId == node1HostId) {
-                    val channel = node1SessionRegistry.getChannel(event.sessionId)
+                    val channel = node1SessionRegistry.getChannel(targetConnectionId)
                     if (channel != null) {
                         val sseEvent = ServerSentEvent.builder<String>()
+                            .id(event.eventId)
                             .event(event.type)
                             .data(objectMapper.writeValueAsString(event))
                             .build()
@@ -71,33 +71,37 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
         val node2StreamService = StreamService(
             kafkaTemplate = fakeKafkaTemplate,
             sessionRegistry = node2SessionRegistry,
-            redisSessionRegistry = mockRedisSessionRegistry,
+            redisConnectionRegistry = mockRedisConnectionRegistry,
             redisStreamRoutingService = node2RedisStreamRoutingService,
             conversationHistoryStore = conversationHistoryStore,
             hostId = node2HostId,
             objectMapper = objectMapper
         )
 
-        `when`("Node 1에 사용자의 SSE 소켓(sessionId: test-user-session-100)이 등록되어 있을 때") {
-            val userSessionId = "test-user-session-100"
+        `when`("Node 1에 사용자의 SSE 소켓(connectionId: test-user-conn-100)이 등록되어 있을 때") {
+            val userConnectionId = "test-user-conn-100"
+            val userCommandId = "cmd-test-200"
             val userSseChannel = Channel<ServerSentEvent<String>>(10)
 
-            node1SessionRegistry.register(userSessionId, userSseChannel)
+            node1SessionRegistry.register(userConnectionId, userSseChannel)
 
-            given(mockRedisSessionRegistry.getSessionHost(userSessionId))
+            given(mockRedisConnectionRegistry.getConnectionByCommand(userCommandId))
+                .willReturn(Mono.just(userConnectionId))
+            given(mockRedisConnectionRegistry.getConnectionHost(userConnectionId))
                 .willReturn(Mono.just(node1HostId))
 
-            `when`("Node 2가 Kafka에서 Node 1을 타깃으로 하는 응답 이벤트를 수신하면") {
-                val incomingEvent = AgentResponseEvent(
-                    sessionId = userSessionId,
+            `when`("Node 2가 Kafka에서 해당 커맨드의 이벤트를 수신하면") {
+                val incomingEvent = AgentEvent(
+                    eventId = "evt-test-123",
+                    commandId = userCommandId,
                     conversationId = "conv-test-123",
                     hostId = node1HostId,
                     type = "CHUNK",
                     content = "Ollama Qwen2.5-7B 토큰 테스트 데이터",
-                    metadata = EventMetadata(step = "report_generation")
+                    metadata = mapOf("step" to "report_generation")
                 )
 
-                node2StreamService.handleAgentResponse(incomingEvent)
+                node2StreamService.handleAgentEvent(incomingEvent)
 
                 then("Node 2는 본인 소켓이 아님을 감지하고 Node 1의 Redis Stream(stream:host:kotlin-node-1)으로 라우팅해야 한다") {
                     lastPublishedTargetStreamKey shouldBe "stream:host:kotlin-node-1"

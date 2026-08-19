@@ -1,7 +1,7 @@
 # Task Phase 4: Frontend Web Application 개발 (Vite + React)
 
 * **목표**: 독립된 React 웹 애플리케이션을 구축하여 실시간 추론 타임라인 및 마크다운 타자기 스트리밍 UI를 구현합니다.
-* **관련 문서**: [기술 명세서](../3.spec.md) | [마스터 체크리스트](README.md)
+* **관련 문서**: [기술 명세서](../spec.md) | [마스터 체크리스트](README.md)
 
 ---
 

@@ -1,14 +1,14 @@
 # Task Phase 6: A2UI (Agent-to-UI) 선언적 UI 생성 및 양방향 피드백 연동
 
 * **목표**: 에이전트(LLM)가 단순 마크다운 텍스트를 넘어 선언적 UI 스키마(JSON Protocol)를 스트리밍 생성하고, 프론트엔드가 이를 인터랙티브 대시보드로 렌더링하며, 사용자의 UI 액션 선택을 백엔드 및 에이전트로 피드백하는 A2UI 시스템을 구현합니다.
-* **관련 문서**: [기술 명세서](../3.spec.md) | [마스터 체크리스트](README.md)
+* **관련 문서**: [기술 명세서](../spec.md) | [마스터 체크리스트](README.md)
 
 ---
 
 ## 세부 작업 항목 (Sub-tasks)
 
 - [x] **Task 6.1: A2UI 데이터 스키마 및 REST API 명세 확장**
-  * `docs/3.spec.md` 내 SSE 이벤트 타입에 `A2UI_RENDER` 추가
+  * `docs/spec.md` 내 SSE 이벤트 타입에 `A2UI_RENDER` 추가
   * 사용자 A2UI 액션 제출용 `POST /api/chat/action` REST 엔드포인트 규격 정의
   * Kafka 요청 토픽(`agent-requests`)에 `actionId` 및 `payload` 스키마 확장
 
