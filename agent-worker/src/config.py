@@ -18,5 +18,12 @@ TOPIC_AGENT_RESPONSES: str = os.getenv("TOPIC_AGENT_RESPONSES", "agent-responses
 # Kafka Consumer가 속할 소비자 그룹(Consumer Group)의 ID입니다.
 KAFKA_CONSUMER_GROUP_ID: str = os.getenv("KAFKA_CONSUMER_GROUP_ID", "python-agent-group")
 
-# OpenAI API Key를 환경 변수에서 가져옵니다. (없을 경우 기본값 None)
+# OpenAI API Key를 환경 변수에서 가져옵니다. (없을 경우 기본값 빈 문자열)
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+# 로컬 Ollama 서비스 호스트 엔드포인트 주소입니다. (기본: http://localhost:11434)
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+# Ollama에서 실행할 기본 로컬 대형 언어 모델(LLM) 이름입니다. (기본: qwen2.5:7b)
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+

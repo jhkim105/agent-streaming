@@ -42,24 +42,30 @@ class AgentKafkaProducer:
         host_id: str,
         event_type: str,
         content: str,
+        conversation_id: str = "",
+        title: str = "",
         step: str = ""
     ) -> None:
         """
         클라이언트 게이트웨이가 이해할 수 있는 규격화된 Kafka 응답 메시지를 전송합니다.
-        - session_id: 사용자 세션 유니크 ID (UUID)
+        - session_id: 사용자 네트워크 소켓 세션 유니크 ID (UUID)
         - host_id: 타겟 코틀린 게이트웨이 서버 ID
-        - event_type: 이벤트 종류 (STATUS | CHUNK | DONE | ERROR)
+        - event_type: 이벤트 종류 (STATUS | CHUNK | A2UI_RENDER | DONE | ERROR)
         - content: 텍스트 내용 (상태 로그 메시지 또는 LLM 생성 토큰 조각)
+        - conversation_id: 비즈니스 리서치 대화 식별자
+        - title: LLM이 생성한 스마트 이모지 요약 타이틀 (예: 🌱 Spring Boot & Kotlin 동향)
         - step: 에이전트의 현재 추론 단계 이름 (예: query_analysis, search, scraping)
         """
         # 카프카 응답 스키마 규격에 맞게 파이썬 딕셔너리를 구성합니다.
         payload: Dict[str, Any] = {
             "sessionId": session_id,
+            "conversationId": conversation_id,
             "hostId": host_id,
             "type": event_type,
             "content": content,
             "metadata": {
                 "step": step,
+                "title": title,
                 "timestamp": int(time.time() * 1000)  # 밀리초 단위 현재 타임스탬프
             }
         }

@@ -42,10 +42,10 @@ export const A2UIRenderer: React.FC<A2UIRendererProps> = ({ data, onActionSelect
           <div className="a2ui-options-grid">
             {data.action_section.options.map((opt: A2UIActionOption) => (
               <button
-                key={opt.action_id}
+                key={opt.action_id || opt.id}
                 className="a2ui-option-btn"
                 disabled={disabled}
-                onClick={() => onActionSelect(opt.action_id, opt.payload || { label: opt.label })}
+                onClick={() => onActionSelect(opt.action_id || opt.id, opt.payload || { label: opt.label })}
               >
                 <span className="a2ui-option-label">{opt.label}</span>
                 {opt.description && <span className="a2ui-option-subtext">{opt.description}</span>}
