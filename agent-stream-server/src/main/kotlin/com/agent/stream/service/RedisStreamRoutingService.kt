@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.springframework.data.redis.connection.stream.ReadOffset
 import org.springframework.data.redis.connection.stream.StreamOffset
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
@@ -30,6 +33,7 @@ class RedisStreamRoutingService(
 ) {
     private val streamKeyPrefix = "stream:host:"
     private var streamSubscription: Disposable? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Default)
 
     /**
      * 노드 기동 시 본인 이름의 레디스 스트림(stream:host:{localHostId}) 단 1개만 XREAD로 릴레이 대기합니다.
@@ -54,7 +58,9 @@ class RedisStreamRoutingService(
                         val streamRecordId = record.id.value
 
                         logger.debug { "노드전용 Stream 이벤트 수신 (ID=$streamRecordId): type=${event.type}, targetConnectionId=$targetConnectionId" }
-                        dispatchToLocalClient(event, targetConnectionId, streamRecordId)
+                        serviceScope.launch {
+                            dispatchToLocalClient(event, targetConnectionId, streamRecordId)
+                        }
                     }
                 } catch (e: Exception) {
                     logger.error(e) { "Redis Stream 메시지 파싱 중 오류 발생: recordId=${record.id.value}" }
@@ -106,9 +112,9 @@ class RedisStreamRoutingService(
     }
 
     /**
-     * local SSE SendChannel 세션에 이벤트를 전송하며, eventId를 W3C SSE id로 전송합니다.
+     * local SSE SendChannel 세션에 이벤트를 전송하며, eventId를 W3C SSE id로 전송합니다. (Issue #5: send() 배압 보장)
      */
-    private fun dispatchToLocalClient(event: AgentEvent, targetConnectionId: String, streamRecordId: String) {
+    open suspend fun dispatchToLocalClient(event: AgentEvent, targetConnectionId: String, streamRecordId: String) {
         val channel = sessionRegistry.getChannel(targetConnectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
@@ -117,11 +123,12 @@ class RedisStreamRoutingService(
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
-            val result = channel.trySend(sseEvent)
-            if (result.isSuccess) {
+            try {
+                // Issue #5: trySend 대신 send()로 배압 지원
+                channel.send(sseEvent)
                 logger.debug { "Client SSE 배달 성공 (Event ID=${event.eventId}): type=${event.type}, connectionId=$targetConnectionId" }
-            } else {
-                logger.warn { "Client SSE 배달 실패 (Channel full or closed): connectionId=$targetConnectionId" }
+            } catch (e: Exception) {
+                logger.warn(e) { "Client SSE 배달 실패 (Channel closed): connectionId=$targetConnectionId" }
             }
         } else {
             logger.debug { "해당 connectionId의 로컬 세션을 찾을 수 없음: connectionId=$targetConnectionId" }

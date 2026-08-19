@@ -46,6 +46,7 @@ class ConversationController(
 
     /**
      * 특정 대화 스레드에 대해 실시간 SSE 단방향 연결을 수립합니다. (GET /api/conversations/{conversationId}/events)
+     * Issue #5 해결: trySend() 대신 코루틴 send()를 사용하여 배압(Backpressure)을 보장합니다.
      */
     @GetMapping("/{conversationId}/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun streamEvents(
@@ -63,7 +64,7 @@ class ConversationController(
         // 2. Redis 연결 위치 동적 저장소에 소켓 위치 등록 (connection:host:{connectionId} -> hostId)
         redisConnectionRegistry.registerConnectionHost(connectionId, hostId).subscribe()
 
-        // 3. INIT 이벤트 전달 (connectionId 및 conversationId 함께 반환)
+        // 3. INIT 이벤트 전달 (Issue #5: send()로 배압 지원)
         val initEventPayload = AgentEvent(
             eventId = "evt-init-" + UUID.randomUUID().toString().take(8),
             conversationId = validConversationId,
@@ -78,7 +79,7 @@ class ConversationController(
             .data(objectMapper.writeValueAsString(initEventPayload))
             .build()
 
-        trySend(initSseEvent)
+        send(initSseEvent)
 
         // 4. W3C Last-Event-ID 커서 존재 시 끊어진 시점 이후의 미수신 이벤트를 Redis Stream에서 복원 릴레이
         if (lastEventId != null && lastEventId.isNotBlank()) {
@@ -91,7 +92,12 @@ class ConversationController(
                             .event(event.type)
                             .data(objectMapper.writeValueAsString(event))
                             .build()
-                        trySend(replayEvent)
+                        try {
+                            // Issue #5 배압 보장
+                            this@callbackFlow.trySend(replayEvent)
+                        } catch (e: Exception) {
+                            logger.error(e) { "복원 이벤트 배달 에러" }
+                        }
                     }
                 }, { err ->
                     logger.error(err) { "Last-Event-ID 이벤트 복원 중 오류 발생: lastEventId=$lastEventId" }
