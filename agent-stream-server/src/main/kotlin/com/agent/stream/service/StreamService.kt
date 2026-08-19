@@ -6,6 +6,9 @@ import com.agent.stream.session.RedisConnectionRegistry
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.codec.ServerSentEvent
 import org.springframework.kafka.core.KafkaTemplate
@@ -25,6 +28,8 @@ class StreamService(
 ) {
     @Value("\${app.kafka.topic-commands:agent-commands}")
     private lateinit var topicCommands: String
+
+    private val serviceScope = CoroutineScope(Dispatchers.Default)
 
     /**
      * AgentCommand를 등록하고 Redis에 commandId -> connectionId 매핑 저장 후 카프카 커맨드 토픽으로 전송합니다.
@@ -76,9 +81,8 @@ class StreamService(
             .defaultIfEmpty("")
             .flatMap { targetConnectionId ->
                 if (targetConnectionId.isBlank()) {
-                    // connectionId를 직접 못 찾은 경우 본인 노드 또는 event에 명시된 소켓으로 직통
                     logger.debug { "commandId에 매핑된 connectionId 없음: commandId=${event.commandId}" }
-                    dispatchToLocalClient(event, "")
+                    serviceScope.launch { dispatchToLocalClient(event, "") }
                     return@flatMap reactor.core.publisher.Mono.empty<Void>()
                 }
 
@@ -87,11 +91,11 @@ class StreamService(
                     .defaultIfEmpty(event.hostId.ifBlank { hostId })
                     .doOnNext { targetHostId ->
                         if (targetHostId == hostId) {
-                            // 본인 노드인 경우 직통 배달
+                            // 본인 노드인 경우 직통 배달 (Issue #5: CoroutineScope에서 send() 배압 배달)
                             logger.debug { "본인 노드 소켓 직통 배달 (hostId=$hostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
-                            dispatchToLocalClient(event, targetConnectionId)
+                            serviceScope.launch { dispatchToLocalClient(event, targetConnectionId) }
                         } else {
-                            // 타 노드인 경우 Redis Streams XADD 릴레이 (targetConnectionId 포함)
+                            // 타 노드인 경우 Redis Streams XADD 릴레이
                             logger.info { "타 노드 소켓 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
                             redisStreamRoutingService.publishToTargetStream(targetHostId, targetConnectionId, event).subscribe()
                         }
@@ -104,9 +108,9 @@ class StreamService(
     }
 
     /**
-     * local SSE SendChannel 세션에 이벤트를 전송합니다.
+     * local SSE SendChannel 세션에 이벤트를 전송합니다. (Issue #5: send() 호출로 배압 보장)
      */
-    fun dispatchToLocalClient(event: AgentEvent, connectionId: String) {
+    suspend fun dispatchToLocalClient(event: AgentEvent, connectionId: String) {
         val channel = sessionRegistry.getChannel(connectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
@@ -115,11 +119,12 @@ class StreamService(
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
-            val result = channel.trySend(sseEvent)
-            if (result.isSuccess) {
-                logger.debug { "Client SSE 배달 성공: type=${event.type}, connectionId=$connectionId" }
-            } else {
-                logger.warn { "Client SSE 배달 실패 (Channel full or closed): connectionId=$connectionId" }
+            try {
+                // Issue #5: trySend 대신 send()로 채널 가득 차도 유실 없이 배압 대기
+                channel.send(sseEvent)
+                logger.debug { "Client SSE 배달 성공 (send 배압 보장): type=${event.type}, connectionId=$connectionId" }
+            } catch (e: Exception) {
+                logger.warn(e) { "Client SSE 배달 실패 (Channel closed): connectionId=$connectionId" }
             }
         } else {
             logger.debug { "해당 connectionId의 로컬 세션을 찾을 수 없음: connectionId=$connectionId" }
