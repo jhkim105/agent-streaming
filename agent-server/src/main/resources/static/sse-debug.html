@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSE Raw Packet Inspector - Agent Stream Server</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg-dark: #0f172a;
+      --panel-bg: #1e293b;
+      --text-bright: #f8fafc;
+      --text-dim: #94a3b8;
+      --accent-cyan: #38bdf8;
+      --accent-green: #22c55e;
+      --accent-yellow: #eab308;
+      --accent-purple: #c084fc;
+      --accent-red: #f87171;
+      --border-color: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-bright);
+      font-family: 'JetBrains Mono', monospace;
+      padding: 1.25rem;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    header {
+      background-color: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .badge.disconnected { background: #334155; color: var(--text-dim); }
+    .badge.connecting { background: #eab308; color: #000; }
+    .badge.connected { background: #22c55e; color: #000; }
+    .badge.error { background: #ef4444; color: #fff; }
+
+    .control-panel {
+      background-color: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    label {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      font-family: 'Inter', sans-serif;
+    }
+
+    input[type="text"] {
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      color: var(--text-bright);
+      padding: 0.45rem 0.65rem;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.82rem;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    button {
+      background: #334155;
+      color: var(--text-bright);
+      border: 1px solid var(--border-color);
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    button:hover {
+      background: #475569;
+    }
+    button.primary {
+      background: #0284c7;
+      border-color: #0284c7;
+      color: #ffffff;
+    }
+    button.primary:hover {
+      background: #0369a1;
+    }
+
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      background: #0f172a;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .filter-btn {
+      padding: 0.2rem 0.5rem;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-dim);
+    }
+    .filter-btn.active {
+      background: #1e293b;
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .terminal-container {
+      background: #090d16;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      flex: 1;
+      min-height: 480px;
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .packet-card {
+      background: #0f172a;
+      border-left: 3px solid #475569;
+      border-radius: 4px;
+      padding: 0.55rem 0.75rem;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .packet-card.INIT { border-left-color: var(--accent-purple); }
+    .packet-card.STATUS { border-left-color: var(--accent-yellow); }
+    .packet-card.CHUNK { border-left-color: var(--accent-green); }
+    .packet-card.A2UI_RENDER { border-left-color: var(--accent-cyan); }
+    .packet-card.DONE { border-left-color: var(--accent-green); }
+    .packet-card.ERROR { border-left-color: var(--accent-red); }
+
+    .packet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      border-bottom: 1px dashed #1e293b;
+      padding-bottom: 0.2rem;
+    }
+
+    .event-type {
+      font-weight: 600;
+    }
+    .event-type.INIT { color: var(--accent-purple); }
+    .event-type.STATUS { color: var(--accent-yellow); }
+    .event-type.CHUNK { color: var(--accent-green); }
+    .event-type.A2UI_RENDER { color: var(--accent-cyan); }
+    .event-type.DONE { color: var(--accent-green); }
+    .event-type.ERROR { color: var(--accent-red); }
+
+    .raw-data {
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-bright);
+      background: #030712;
+      padding: 0.4rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>SSE Raw Packet Inspector</h1>
+    <div>
+      <span id="connectionBadge" class="badge disconnected">DISCONNECTED</span>
+    </div>
+  </header>
+
+  <div class="control-panel">
+    <!-- Row 1: Conversation & SSE Connection -->
+    <div class="row">
+      <button onclick="createConversation()">1. 새 대화 생성</button>
+      <label>Conv ID:</label>
+      <input type="text" id="convIdInput" placeholder="conv-xxxx">
+      <label>Conn ID:</label>
+      <input type="text" id="connIdInput" placeholder="conn-xxxx (자동채움)" readonly>
+      <button class="primary" onclick="toggleSSE()">2. SSE 연결/해제</button>
+    </div>
+
+    <!-- Row 2: Last-Event-ID & Command Submission -->
+    <div class="row">
+      <label>Last-Event-ID:</label>
+      <input type="text" id="lastEventIdInput" placeholder="evt-xxx">
+      <input type="text" id="commandInput" placeholder="질문 커맨드 입력 (예: 최근 생성형 AI 동향 알려줘)">
+      <button class="primary" onclick="sendCommand()">3. 커맨드 전송</button>
+    </div>
+
+    <!-- Row 3: Filter & Logs Control -->
+    <div class="filter-bar">
+      <div style="display: flex; gap: 0.3rem;">
+        <button class="filter-btn active" onclick="setFilter('ALL', this)">ALL</button>
+        <button class="filter-btn" onclick="setFilter('INIT', this)">INIT</button>
+        <button class="filter-btn" onclick="setFilter('STATUS', this)">STATUS</button>
+        <button class="filter-btn" onclick="setFilter('CHUNK', this)">CHUNK</button>
+        <button class="filter-btn" onclick="setFilter('A2UI_RENDER', this)">A2UI_RENDER</button>
+        <button class="filter-btn" onclick="setFilter('DONE', this)">DONE</button>
+        <button class="filter-btn" onclick="setFilter('ERROR', this)">ERROR</button>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <label><input type="checkbox" id="autoScrollCheck" checked> Auto Scroll</label>
+        <button onclick="clearLogs()">Clear Logs</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Packet Stream Logs Terminal -->
+  <div class="terminal-container" id="terminalLog">
+    <div style="color: var(--text-dim); text-align: center; margin-top: 2rem; font-size: 0.82rem;">
+      [1. 새 대화 생성] ➔ [2. SSE 연결] ➔ [3. 커맨드 전송] 진행 시 원문 SSE 수신 패킷이 이곳에 타임스탬프와 함께 표출됩니다.
+    </div>
+  </div>
+
+  <script>
+    let eventSource = null;
+    let activeFilter = 'ALL';
+    let packetCount = 0;
+
+    function updateBadge(status) {
+      const badge = document.getElementById('connectionBadge');
+      badge.className = 'badge ' + status.toLowerCase();
+      badge.innerText = status;
+    }
+
+    async function createConversation() {
+      try {
+        const res = await fetch('/api/conversations', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('convIdInput').value = data.conversationId;
+          logSystemMessage(`[System] 새 대화 생성 완료: ${data.conversationId}`);
+        }
+      } catch (err) {
+        logSystemMessage(`[Error] 대화 생성 실패: ${err.message}`, true);
+      }
+    }
+
+    function toggleSSE() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+        updateBadge('DISCONNECTED');
+        logSystemMessage('[System] SSE 연결 해제됨');
+        return;
+      }
+
+      const convId = document.getElementById('convIdInput').value.trim();
+      if (!convId) {
+        alert('먼저 conversationId를 생성하거나 입력해주세요.');
+        return;
+      }
+
+      const lastEventId = document.getElementById('lastEventIdInput').value.trim();
+      let streamUrl = `/api/conversations/${encodeURIComponent(convId)}/events`;
+
+      updateBadge('CONNECTING');
+      logSystemMessage(`[System] SSE 연결 시도 중... (${streamUrl})`);
+
+      // EventSource 생성 (W3C Standard)
+      eventSource = new EventSource(streamUrl);
+
+      eventSource.onopen = () => {
+        updateBadge('CONNECTED');
+        logSystemMessage('[System] SSE 연결 성공 (CONNECTED)');
+      };
+
+      const eventTypes = ['INIT', 'STATUS', 'CHUNK', 'A2UI_RENDER', 'DONE', 'ERROR'];
+
+      eventTypes.forEach(type => {
+        eventSource.addEventListener(type, (evt) => {
+          handleSsePacket(type, evt);
+        });
+      });
+
+      eventSource.onerror = (err) => {
+        updateBadge('ERROR');
+        logSystemMessage('[System Error] SSE 연결 장애 발생', true);
+      };
+    }
+
+    function handleSsePacket(type, evt) {
+      packetCount++;
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      const eventId = evt.lastEventId || 'N/A';
+
+      if (type === 'INIT') {
+        try {
+          const parsed = JSON.parse(evt.data);
+          if (parsed.metadata && parsed.metadata.connectionId) {
+            document.getElementById('connIdInput').value = parsed.metadata.connectionId;
+          }
+        } catch(e) {}
+      }
+
+      renderPacketCard({
+        count: packetCount,
+        timestamp: timeStr,
+        type: type,
+        eventId: eventId,
+        rawData: evt.data
+      });
+    }
+
+    async function sendCommand() {
+      const convId = document.getElementById('convIdInput').value.trim();
+      const connId = document.getElementById('connIdInput').value.trim();
+      const query = document.getElementById('commandInput').value.trim();
+
+      if (!convId || !query) {
+        alert('conversationId와 커맨드 질문 내용을 입력해주세요.');
+        return;
+      }
+
+      try {
+        logSystemMessage(`[System] AgentCommand 전송 중: '${query}'`);
+        const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}/commands`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            connectionId: connId,
+            type: 'RESEARCH',
+            payload: { query: query }
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          logSystemMessage(`[System] AgentCommand 수락됨 (202 Accepted): commandId=${data.commandId}`);
+        }
+      } catch (err) {
+        logSystemMessage(`[Error] 커맨드 전송 실패: ${err.message}`, true);
+      }
+    }
+
+    function renderPacketCard(pkt) {
+      const terminal = document.getElementById('terminalLog');
+      
+      const card = document.createElement('div');
+      card.className = `packet-card ${pkt.type}`;
+      card.dataset.type = pkt.type;
+
+      if (activeFilter !== 'ALL' && activeFilter !== pkt.type) {
+        card.style.display = 'none';
+      }
+
+      card.innerHTML = `
+        <div class="packet-header">
+          <span>#${pkt.count} | <span class="event-type ${pkt.type}">${pkt.type}</span> | ID: <strong>${pkt.eventId}</strong></span>
+          <span>⏱️ ${pkt.timestamp}</span>
+        </div>
+        <div class="raw-data">${escapeHtml(pkt.rawData)}</div>
+      `;
+
+      terminal.appendChild(card);
+
+      if (document.getElementById('autoScrollCheck').checked) {
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    }
+
+    function logSystemMessage(msg, isError = false) {
+      const terminal = document.getElementById('terminalLog');
+      const div = document.createElement('div');
+      div.style.color = isError ? 'var(--accent-red)' : 'var(--accent-cyan)';
+      div.style.fontSize = '0.78rem';
+      div.style.padding = '0.2rem 0';
+      div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      terminal.appendChild(div);
+      if (document.getElementById('autoScrollCheck').checked) {
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    }
+
+    function setFilter(filterType, btn) {
+      activeFilter = filterType;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.querySelectorAll('.packet-card').forEach(card => {
+        if (filterType === 'ALL' || card.dataset.type === filterType) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function clearLogs() {
+      document.getElementById('terminalLog').innerHTML = '';
+      packetCount = 0;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+  </script>
+</body>
+</html>

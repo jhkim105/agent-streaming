@@ -45,12 +45,10 @@ class StreamService(
             timestamp = System.currentTimeMillis()
         )
 
-        // 1. Redis에 commandId -> connectionId 매핑 등록
         if (finalCommand.connectionId.isNotBlank()) {
             redisConnectionRegistry.registerCommandConnection(finalCommand.commandId, finalCommand.connectionId).subscribe()
         }
 
-        // 2. Kafka 커맨드 토픽으로 발행
         val payloadMap = mapOf(
             "commandId" to finalCommand.commandId,
             "conversationId" to finalCommand.conversationId,
@@ -69,14 +67,14 @@ class StreamService(
     }
 
     /**
-     * AgentEvent 수신 시 commandId -> connectionId -> hostId 다단계 동적 매핑 조회 후
-     * 본인 노드 소켓 직통 배달 또는 타 노드 Redis Stream 릴레이를 수행합니다.
+     * AgentEvent 수신 시 local SessionRegistry 우선 검사로 직통 배달을 최우선 보장하고,
+     * 로컬에 없을 경우에만 Redis Stream 릴레이를 수행합니다. (stale hostId 감쇄 보장)
      */
     fun handleAgentEvent(event: AgentEvent) {
         // 1. 대화 이력 저장소에 실시간 이벤트 축적
         conversationHistoryStore.appendEvent(event)
 
-        // 2. commandId로 해당 명령을 보낸 connectionId 동적 조회
+        // 2. commandId로 connectionId 동적 조회
         redisConnectionRegistry.getConnectionByCommand(event.commandId)
             .defaultIfEmpty("")
             .flatMap { targetConnectionId ->
@@ -86,16 +84,20 @@ class StreamService(
                     return@flatMap reactor.core.publisher.Mono.empty<Void>()
                 }
 
-                // 3. connectionId로 해당 소켓이 위치한 타깃 서버 노드(targetHostId) 동적 조회
+                // 3. 로컬 노드 SessionRegistry에 해당 connectionId 소켓이 이미 존속하는지 1순위 검사 (hasSession)
+                if (sessionRegistry.hasSession(targetConnectionId)) {
+                    logger.debug { "로컬 노드 소켓 1순위 직통 배달 (hostId=$hostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
+                    serviceScope.launch { dispatchToLocalClient(event, targetConnectionId) }
+                    return@flatMap reactor.core.publisher.Mono.empty<Void>()
+                }
+
+                // 4. 로컬에 없는 경우 타깃 서버 노드(targetHostId) 동적 조회 후 Redis Stream 릴레이
                 redisConnectionRegistry.getConnectionHost(targetConnectionId)
                     .defaultIfEmpty(event.hostId.ifBlank { hostId })
                     .doOnNext { targetHostId ->
                         if (targetHostId == hostId) {
-                            // 본인 노드인 경우 직통 배달 (Issue #5: CoroutineScope에서 send() 배압 배달)
-                            logger.debug { "본인 노드 소켓 직통 배달 (hostId=$hostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
                             serviceScope.launch { dispatchToLocalClient(event, targetConnectionId) }
                         } else {
-                            // 타 노드인 경우 Redis Streams XADD 릴레이
                             logger.info { "타 노드 소켓 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
                             redisStreamRoutingService.publishToTargetStream(targetHostId, targetConnectionId, event).subscribe()
                         }
@@ -108,7 +110,7 @@ class StreamService(
     }
 
     /**
-     * local SSE SendChannel 세션에 이벤트를 전송합니다. (Issue #5: send() 호출로 배압 보장)
+     * local SSE SendChannel 세션에 이벤트를 전송합니다. (send() 호출로 배압 보장)
      */
     suspend fun dispatchToLocalClient(event: AgentEvent, connectionId: String) {
         val channel = sessionRegistry.getChannel(connectionId)
@@ -120,7 +122,6 @@ class StreamService(
                 .build()
 
             try {
-                // Issue #5: trySend 대신 send()로 채널 가득 차도 유실 없이 배압 대기
                 channel.send(sseEvent)
                 logger.debug { "Client SSE 배달 성공 (send 배압 보장): type=${event.type}, connectionId=$connectionId" }
             } catch (e: Exception) {

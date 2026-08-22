@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { AgentEvent, ConnectionStatus, StatusLog, A2UIData, ConversationSummary, ConversationDetail } from '../types/agent';
+import type { AgentEvent, ConnectionStatus, StatusLog, A2UIData, ConversationSummary, ConversationDetail, RawPacketLog } from '../types/agent';
 
 const CONVERSATIONS_URL = '/api/conversations';
 const CONVERSATION_STORAGE_KEY = 'agent_streaming_current_conversation_id';
@@ -16,14 +16,36 @@ export function useAgentStream() {
   const [a2uiData, setA2uiData] = useState<A2UIData | null>(null);
   const [isResearching, setIsResearching] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // RAW SSE 패킷 수신 로그 스택 (디버깅용)
+  const [rawPacketLogs, setRawPacketLogs] = useState<RawPacketLog[]>([]);
 
   // 히스토리 대화 목록 상태
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
 
+  // React Hook Rules 준수: 모든 useRef 선언을 useCallback 이전 최상단에 배치
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
+  const researchSafetyTimeoutRef = useRef<any>(null);
   const lastEventIdRef = useRef<string | null>(localStorage.getItem(LAST_EVENT_ID_KEY));
   const connectionIdRef = useRef<string | null>(null);
+  const packetCountRef = useRef<number>(0);
+
+  // 안전 타임아웃 해제 헬퍼 (응답 지연 시 락 자동 해제)
+  const resetSafetyTimeout = useCallback(() => {
+    if (researchSafetyTimeoutRef.current) {
+      clearTimeout(researchSafetyTimeoutRef.current);
+      researchSafetyTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startSafetyTimeout = useCallback(() => {
+    resetSafetyTimeout();
+    researchSafetyTimeoutRef.current = setTimeout(() => {
+      setIsResearching(false);
+      setErrorMsg('에이전트 응답 시간이 초과되었습니다. 다시 시도해 주세요.');
+    }, 60000);
+  }, [resetSafetyTimeout]);
 
   // 이전 대화 요약 목록 조회 API 호출 (GET /api/conversations)
   const fetchConversations = useCallback(async () => {
@@ -42,15 +64,14 @@ export function useAgentStream() {
   const selectConversation = useCallback(async (targetConvId: string) => {
     try {
       setErrorMsg(null);
+      resetSafetyTimeout();
       const res = await fetch(`${CONVERSATIONS_URL}/${targetConvId}`);
       if (res.ok) {
         const detail: ConversationDetail = await res.json();
         
-        // 대화 상태 복원
         setConversationId(detail.conversationId);
         localStorage.setItem(CONVERSATION_STORAGE_KEY, detail.conversationId);
 
-        // 타임라인 상태 로그 복원
         const restoredLogs: StatusLog[] = detail.timelineEvents.map((evt) => ({
           id: evt.eventId || Math.random().toString(36).substring(2, 9),
           step: evt.metadata?.step || 'thinking',
@@ -59,10 +80,8 @@ export function useAgentStream() {
         }));
         setStatusLogs(restoredLogs);
 
-        // 완성된 마크다운 보고서 복원
         setReportMarkdown(detail.fullReport || '');
 
-        // A2UI 대시보드 데이터 복원
         if (detail.a2uiPayload) {
           try {
             setA2uiData(JSON.parse(detail.a2uiPayload));
@@ -74,13 +93,12 @@ export function useAgentStream() {
         }
 
         setIsResearching(!detail.isCompleted);
-        console.log('[Conversation Restored]', detail.conversationId);
       }
     } catch (err: any) {
       console.error('[Select Conversation Error]', err);
       setErrorMsg(`대화 복원 실패: ${err.message}`);
     }
-  }, []);
+  }, [resetSafetyTimeout]);
 
   // 명시적 신규 대화 스레드 생성 (POST /api/conversations)
   const createNewConversation = useCallback(async (): Promise<string> => {
@@ -100,6 +118,22 @@ export function useAgentStream() {
     setConversationId(fallbackId);
     localStorage.setItem(CONVERSATION_STORAGE_KEY, fallbackId);
     return fallbackId;
+  }, []);
+
+  // RAW 패킷 덤프 기록 헬퍼
+  const pushRawPacket = useCallback((type: string, event: MessageEvent) => {
+    packetCountRef.current += 1;
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    
+    const newPacket: RawPacketLog = {
+      count: packetCountRef.current,
+      timestamp: timeStr,
+      type: type,
+      eventId: event.lastEventId || 'N/A',
+      rawData: event.data || ''
+    };
+    setRawPacketLogs((prev) => [...prev, newPacket]);
   }, []);
 
   // SSE 커넥션 수립 함수 (GET /api/conversations/{id}/events)
@@ -123,8 +157,8 @@ export function useAgentStream() {
       setErrorMsg(null);
     };
 
-    // 1. INIT 이벤트 (connectionId 및 conversationId 수신)
-    es.addEventListener('INIT', (event) => {
+    es.addEventListener('INIT', (event: MessageEvent) => {
+      pushRawPacket('INIT', event);
       try {
         const data: AgentEvent = JSON.parse(event.data);
         const connId = data.metadata?.connectionId || null;
@@ -136,14 +170,14 @@ export function useAgentStream() {
           setConversationId(data.conversationId);
           localStorage.setItem(CONVERSATION_STORAGE_KEY, data.conversationId);
         }
-        console.log('[SSE INIT] ConnectionId:', connId, 'Conv:', data.conversationId);
       } catch (err) {
         console.error('[SSE INIT ERROR]', err);
       }
     });
 
-    // 2. STATUS 이벤트 (에이전트 추론 단계 로깅)
-    es.addEventListener('STATUS', (event) => {
+    es.addEventListener('STATUS', (event: MessageEvent) => {
+      pushRawPacket('STATUS', event);
+      startSafetyTimeout();
       try {
         if (event.lastEventId) {
           lastEventIdRef.current = event.lastEventId;
@@ -162,8 +196,9 @@ export function useAgentStream() {
       }
     });
 
-    // 3. CHUNK 이벤트 (마크다운 타자기 토큰 누적)
-    es.addEventListener('CHUNK', (event) => {
+    es.addEventListener('CHUNK', (event: MessageEvent) => {
+      pushRawPacket('CHUNK', event);
+      startSafetyTimeout();
       try {
         if (event.lastEventId) {
           lastEventIdRef.current = event.lastEventId;
@@ -176,27 +211,27 @@ export function useAgentStream() {
       }
     });
 
-    // 4. A2UI_RENDER 이벤트 (선언적 A2UI 대시보드 구조 수신)
-    es.addEventListener('A2UI_RENDER', (event) => {
+    es.addEventListener('A2UI_RENDER', (event: MessageEvent) => {
+      pushRawPacket('A2UI_RENDER', event);
       try {
         const data: AgentEvent = JSON.parse(event.data);
         const parsedA2UI: A2UIData = JSON.parse(data.content);
         setA2uiData(parsedA2UI);
-        console.log('[SSE A2UI_RENDER] A2UI Dashboard Schema Received:', parsedA2UI);
       } catch (err) {
         console.error('[SSE A2UI_RENDER ERROR]', err);
       }
     });
 
-    // 5. DONE 이벤트
-    es.addEventListener('DONE', () => {
+    es.addEventListener('DONE', (event: MessageEvent) => {
+      pushRawPacket('DONE', event);
+      resetSafetyTimeout();
       setIsResearching(false);
-      console.log('[SSE DONE] Research report stream completed');
       fetchConversations();
     });
 
-    // 6. ERROR 이벤트
     es.addEventListener('ERROR', (event: MessageEvent) => {
+      pushRawPacket('ERROR', event);
+      resetSafetyTimeout();
       try {
         if (event.data) {
           const data: AgentEvent = JSON.parse(event.data);
@@ -217,12 +252,11 @@ export function useAgentStream() {
       if (!reconnectTimeoutRef.current) {
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectTimeoutRef.current = null;
-          console.log('[SSE Auto Reconnecting...]');
           connectSSE();
         }, 3000);
       }
     };
-  }, [createNewConversation, fetchConversations]);
+  }, [createNewConversation, fetchConversations, pushRawPacket, resetSafetyTimeout, startSafetyTimeout]);
 
   useEffect(() => {
     connectSSE();
@@ -236,10 +270,10 @@ export function useAgentStream() {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      resetSafetyTimeout();
     };
-  }, [connectSSE, fetchConversations]);
+  }, [connectSSE, fetchConversations, resetSafetyTimeout]);
 
-  // 신규 대화 시작 함수
   const startNewConversation = async () => {
     localStorage.removeItem(CONVERSATION_STORAGE_KEY);
     localStorage.removeItem(LAST_EVENT_ID_KEY);
@@ -249,6 +283,9 @@ export function useAgentStream() {
     setA2uiData(null);
     setErrorMsg(null);
     setIsResearching(false);
+    setRawPacketLogs([]);
+    packetCountRef.current = 0;
+    resetSafetyTimeout();
 
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -258,7 +295,6 @@ export function useAgentStream() {
     connectSSE(newConvId);
   };
 
-  // AgentCommand 제출 함수 (POST /api/conversations/{id}/commands)
   const submitQuery = async (queryText: string) => {
     if (!queryText.trim()) return;
     
@@ -269,12 +305,12 @@ export function useAgentStream() {
 
     const currentConnId = connectionIdRef.current || connectionId;
 
-    // 초기화
     setStatusLogs([]);
     setReportMarkdown('');
     setA2uiData(null);
     setErrorMsg(null);
     setIsResearching(true);
+    startSafetyTimeout();
 
     try {
       const response = await fetch(`${CONVERSATIONS_URL}/${encodeURIComponent(activeConvId)}/commands`, {
@@ -306,10 +342,10 @@ export function useAgentStream() {
       console.error('[Submit Query Error]', err);
       setErrorMsg(`질문 요청 실패: ${err.message}`);
       setIsResearching(false);
+      resetSafetyTimeout();
     }
   };
 
-  // 사용자 A2UI 액션 커맨드 제출 함수 (POST /api/conversations/{id}/commands)
   const sendUserAction = async (actionId: string, payload: Record<string, any>) => {
     const activeConvId = conversationId || localStorage.getItem(CONVERSATION_STORAGE_KEY);
     if (!activeConvId) {
@@ -321,6 +357,7 @@ export function useAgentStream() {
 
     setIsResearching(true);
     setErrorMsg(null);
+    startSafetyTimeout();
 
     try {
       const response = await fetch(`${CONVERSATIONS_URL}/${encodeURIComponent(activeConvId)}/commands`, {
@@ -345,7 +382,13 @@ export function useAgentStream() {
       console.error('[Send User Action Error]', err);
       setErrorMsg(`UI 액션 전송 실패: ${err.message}`);
       setIsResearching(false);
+      resetSafetyTimeout();
     }
+  };
+
+  const clearRawPacketLogs = () => {
+    setRawPacketLogs([]);
+    packetCountRef.current = 0;
   };
 
   return {
@@ -358,6 +401,8 @@ export function useAgentStream() {
     isResearching,
     errorMsg,
     conversations,
+    rawPacketLogs,
+    clearRawPacketLogs,
     submitQuery,
     sendUserAction,
     startNewConversation,

@@ -1,60 +1,23 @@
 .report-container {
-  padding: 1.25rem 1.5rem;
+  padding: 0.5rem 0;
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 480px;
-}
-
-.report-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 0.875rem;
-  border-bottom: 1px solid var(--bg-card-border);
-  margin-bottom: 1rem;
-}
-
-.report-title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.title-icon {
-  color: var(--accent-primary);
 }
 
 .typing-indicator {
   font-size: 0.8rem;
-  color: var(--accent-emerald);
+  color: var(--accent-cyan);
   font-weight: 500;
-  animation: pulseGlow 1s infinite;
 }
 
 .report-content {
   flex: 1;
-  overflow-y: auto;
-  padding-right: 0.5rem;
-}
-
-.empty-report {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-dim);
-  text-align: center;
-  gap: 0.875rem;
-  padding: 3rem 1.5rem;
 }
 
 .markdown-body {
   font-size: 0.95rem;
-  line-height: 1.7;
+  line-height: 1.65;
   color: var(--text-main);
 }
 
@@ -62,36 +25,33 @@
   margin-top: 1.25rem;
   margin-bottom: 0.75rem;
   font-weight: 600;
+  color: var(--text-main);
 }
 
 .markdown-body h1 {
-  font-size: 1.5rem;
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  border-bottom: 1px solid var(--bg-card-border);
-  padding-bottom: 0.5rem;
+  font-size: 1.35rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.4rem;
 }
 
 .markdown-body h2 {
-  font-size: 1.2rem;
-  color: var(--accent-cyan);
+  font-size: 1.15rem;
 }
 
 .markdown-body blockquote {
-  border-left: 3px solid var(--accent-primary);
-  padding-left: 1rem;
+  border-left: 3px solid var(--accent-cyan);
+  padding-left: 0.85rem;
   margin: 1rem 0;
   color: var(--text-muted);
-  background: rgba(99, 102, 241, 0.05);
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-radius: 0 8px 8px 0;
+  background: var(--bg-card-sub);
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+  border-radius: 0 4px 4px 0;
 }
 
 .markdown-body ul, .markdown-body ol {
-  padding-left: 1.5rem;
-  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+  margin: 0.6rem 0;
 }
 
 .markdown-body a {
@@ -106,7 +66,6 @@
 .cursor-blink {
   display: inline-block;
   font-weight: 700;
-  color: var(--accent-primary);
-  animation: pulseGlow 0.8s infinite;
+  color: var(--accent-cyan);
   margin-left: 2px;
 }
