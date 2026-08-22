@@ -1,89 +1,68 @@
-.app-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem;
+/* Light Theme Main App Layout */
+.app-chat-layout {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  overflow: hidden;
+  font-family: var(--font-main);
+}
+
+.chat-main-area {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  min-height: 100vh;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg-main);
 }
 
-/* Header Section */
-.app-header {
+.chat-header-bar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  padding: 1.25rem 1.75rem;
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-main);
 }
 
-.brand-section {
+.chat-model-selector {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  transition: background 0.15s ease;
 }
 
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  background: var(--accent-gradient);
-  border-radius: 10px;
+.chat-model-selector:hover {
+  background: var(--bg-card-sub);
+}
+
+.connection-status-pill {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: white;
-  box-shadow: var(--shadow-glow);
-}
-
-.brand-title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.8rem;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  background: var(--bg-card-sub);
+  border: 1px solid var(--border-color);
+  padding: 0.3rem 0.75rem;
   border-radius: 20px;
-  font-size: 0.825rem;
-  font-weight: 500;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--bg-card-border);
 }
 
-.status-dot {
+.status-dot-sm {
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
-
-.status-dot.connected {
-  background-color: var(--accent-emerald);
-  box-shadow: 0 0 8px var(--accent-emerald);
-}
-
-.status-dot.connecting {
-  background-color: #f59e0b;
-  animation: pulseGlow 1.5s infinite;
-}
-
-.status-dot.disconnected {
-  background-color: #ef4444;
-}
-
-/* Main Layout Grid */
-.main-content-grid {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 1.5rem;
-  flex: 1;
-}
-
-@media (max-width: 900px) {
-  .main-content-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.status-dot-sm.connected { background: var(--accent-green); }
+.status-dot-sm.connecting { background: #eab308; }
+.status-dot-sm.disconnected,
+.status-dot-sm.error { background: #ef4444; }

@@ -33,12 +33,12 @@ class ConversationHistoryStore {
     private val completionMap = ConcurrentHashMap<String, Boolean>()
 
     /**
-     * 명시적으로 신규 대화 스레드를 생성합니다 (POST /api/chat/conversations)
+     * 명시적으로 신규 대화 스레드를 생성합니다 (POST /api/conversations)
      */
     fun createConversation(): String {
         val conversationId = "conv-" + UUID.randomUUID().toString().take(8)
         val now = System.currentTimeMillis()
-        val defaultTitle = "신규 리서치 대화 (${conversationId.takeLast(6)})"
+        val defaultTitle = "새 대화 (${conversationId.takeLast(4)})"
 
         val summary = ConversationSummaryDto(
             conversationId = conversationId,
@@ -66,7 +66,7 @@ class ConversationHistoryStore {
         val formattedTitle = if (!query.isNullOrBlank()) {
             if (query.length > 35) query.take(35) + "..." else query
         } else {
-            "신규 리서치 대화 (${conversationId.takeLast(6)})"
+            "새 대화 (${conversationId.takeLast(4)})"
         }
 
         conversations.compute(conversationId) { id, existing ->
@@ -80,7 +80,7 @@ class ConversationHistoryStore {
                     updatedAt = now
                 )
             } else {
-                val updatedTitle = if (existing.title.startsWith("신규 리서치 대화") && !query.isNullOrBlank()) {
+                val updatedTitle = if (existing.title.startsWith("새 대화") && !query.isNullOrBlank()) {
                     formattedTitle
                 } else existing.title
 
@@ -134,7 +134,7 @@ class ConversationHistoryStore {
     }
 
     /**
-     * 전체 대화 스레드 요약 목록을 최신 순으로 반환합니다. (GET /api/chat/conversations)
+     * 전체 대화 스레드 요약 목록을 최신 순으로 반환합니다. (GET /api/conversations)
      */
     fun getConversationSummaries(): List<ConversationSummaryDto> {
         return conversations.values.sortedByDescending { it.updatedAt }

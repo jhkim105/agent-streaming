@@ -1,7 +1,7 @@
 [project]
-name = "agent-worker"
+name = "agent-runtime"
 version = "0.1.0"
-description = "Real-time AI Researcher Agent Python Worker"
+description = "Agent Runtime Python Engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,5 +24,4 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [project.scripts]
-agent-worker = "src.main:main"
-
+agent-runtime = "src.main:main"

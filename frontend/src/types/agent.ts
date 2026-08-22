@@ -35,6 +35,14 @@ export interface StatusLog {
   timestamp: number;
 }
 
+export interface RawPacketLog {
+  count: number;
+  timestamp: string;
+  type: string;
+  eventId: string;
+  rawData: string;
+}
+
 export interface A2UIMetric {
   id: string;
   label: string;
