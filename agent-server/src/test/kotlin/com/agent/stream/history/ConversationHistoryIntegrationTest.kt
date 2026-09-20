@@ -32,7 +32,8 @@ class ConversationHistoryIntegrationTest : BehaviorSpec({
             `when`("스트리밍 도중 STATUS 및 CHUNK 이벤트가 발생할 때는 타이틀을 변경하지 않다가") {
                 historyStore.appendEvent(
                     AgentEvent(
-                        commandId = "cmd-1",
+                        runId = "run-1",
+                        messageId = "msg-think-1",
                         conversationId = conversationId,
                         hostId = "kotlin-node-1",
                         type = "STATUS",
@@ -43,7 +44,8 @@ class ConversationHistoryIntegrationTest : BehaviorSpec({
 
                 historyStore.appendEvent(
                     AgentEvent(
-                        commandId = "cmd-1",
+                        runId = "run-1",
+                        messageId = "msg-report-1",
                         conversationId = conversationId,
                         hostId = "kotlin-node-1",
                         type = "CHUNK",
@@ -57,7 +59,8 @@ class ConversationHistoryIntegrationTest : BehaviorSpec({
 
                     historyStore.appendEvent(
                         AgentEvent(
-                            commandId = "cmd-1",
+                            runId = "run-1",
+                            messageId = "msg-done",
                             conversationId = conversationId,
                             hostId = "kotlin-node-1",
                             type = "DONE",

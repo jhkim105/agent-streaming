@@ -7,11 +7,13 @@ export interface EventMetadata {
   title?: string;
   timestamp?: number;
   connectionId?: string;
+  replace?: boolean;
 }
 
 export interface AgentEvent {
-  eventId: string;
-  commandId?: string;
+  sseEventId: string;
+  runId: string;
+  messageId: string;
   conversationId?: string;
   hostId?: string;
   type: EventType;
@@ -20,8 +22,8 @@ export interface AgentEvent {
   timestamp?: number;
 }
 
-export interface AgentCommand {
-  commandId?: string;
+export interface AgentRunRequest {
+  runId?: string;
   conversationId?: string;
   connectionId?: string;
   type: 'RESEARCH' | 'ACTION' | 'CANCEL';
@@ -32,6 +34,7 @@ export interface StatusLog {
   id: string;
   step: string;
   content: string;
+  messageId?: string;
   timestamp: number;
 }
 
@@ -39,7 +42,7 @@ export interface RawPacketLog {
   count: number;
   timestamp: string;
   type: string;
-  eventId: string;
+  sseEventId: string;
   rawData: string;
 }
 
@@ -56,7 +59,7 @@ export interface A2UIActionOption {
   action_id?: string;
   label: string;
   description?: string;
-  action_type: string;
+  action_type?: string;
   payload: Record<string, any>;
 }
 
@@ -67,8 +70,9 @@ export interface A2UIActionSection {
 }
 
 export interface A2UIData {
-  surfaceId: string;
-  layout: string;
+  surfaceId?: string;
+  messageId?: string;
+  layout?: string;
   title?: string;
   version?: string;
   metrics?: A2UIMetric[];
@@ -80,6 +84,17 @@ export interface A2UIData {
   }>;
 }
 
+// 1개 턴(사용자 질문 + 에이전트 응답 세트) 모델
+export interface ChatTurn {
+  runId: string;
+  userPrompt: string;
+  statusLogs: StatusLog[];
+  reportMarkdown: string;
+  a2uiData: A2UIData | null;
+  isStreaming: boolean;
+  createdAt: number;
+}
+
 // 히스토리 대화 요약 DTO
 export interface ConversationSummary {
   conversationId: string;
@@ -89,15 +104,27 @@ export interface ConversationSummary {
   updatedAt: number;
 }
 
-// 히스토리 대화 상세 DTO (새로고침 복원 & 히스토리 상세용)
+// 1개 턴(Run) 상세 DTO (백엔드 통신용)
+export interface ConversationRunDetail {
+  runId: string;
+  userPrompt: string;
+  timelineEvents: AgentEvent[];
+  fullReport: string;
+  a2uiPayload?: string;
+  isCompleted: boolean;
+  createdAt?: number;
+}
+
+// 대화 상세 복원 DTO
 export interface ConversationDetail {
   conversationId: string;
   title: string;
   category: string;
   createdAt: number;
   updatedAt: number;
-  timelineEvents: AgentEvent[];
-  fullReport: string;
+  runs?: ConversationRunDetail[];
+  timelineEvents?: AgentEvent[];
+  fullReport?: string;
   a2uiPayload?: string;
-  isCompleted: boolean;
+  isCompleted?: boolean;
 }

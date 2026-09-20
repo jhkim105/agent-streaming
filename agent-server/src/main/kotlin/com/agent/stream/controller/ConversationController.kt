@@ -46,7 +46,7 @@ class ConversationController(
 
     /**
      * 특정 대화 스레드에 대해 실시간 SSE 단방향 연결을 수립합니다. (GET /api/conversations/{conversationId}/events)
-     * Issue #5 해결: trySend() 대신 코루틴 send()를 사용하여 배압(Backpressure)을 보장합니다.
+     * 코루틴 send()를 사용하여 배압(Backpressure)을 보장합니다.
      */
     @GetMapping("/{conversationId}/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun streamEvents(
@@ -64,17 +64,17 @@ class ConversationController(
         // 2. Redis 연결 위치 동적 저장소에 소켓 위치 등록 (connection:host:{connectionId} -> hostId)
         redisConnectionRegistry.registerConnectionHost(connectionId, hostId).subscribe()
 
-        // 3. INIT 이벤트 전달 (Issue #5: send()로 배압 지원)
+        // 3. INIT 이벤트 전달 (send()로 배압 지원)
         val initEventPayload = AgentEvent(
-            eventId = "evt-init-" + UUID.randomUUID().toString().take(8),
+            sseEventId = "evt-init-" + UUID.randomUUID().toString().take(8),
             conversationId = validConversationId,
             hostId = hostId,
             type = "INIT",
-            content = "SSE Connection Established",
+            content = connectionId,
             metadata = mapOf("connectionId" to connectionId)
         )
         val initSseEvent = ServerSentEvent.builder<String>()
-            .id(initEventPayload.eventId)
+            .id(initEventPayload.sseEventId)
             .event("INIT")
             .data(objectMapper.writeValueAsString(initEventPayload))
             .build()
@@ -88,12 +88,11 @@ class ConversationController(
                 .subscribe({ missedEvents ->
                     missedEvents.forEach { event ->
                         val replayEvent = ServerSentEvent.builder<String>()
-                            .id(event.eventId)
+                            .id(event.sseEventId)
                             .event(event.type)
                             .data(objectMapper.writeValueAsString(event))
                             .build()
                         try {
-                            // Issue #5 배압 보장
                             this@callbackFlow.trySend(replayEvent)
                         } catch (e: Exception) {
                             logger.error(e) { "복원 이벤트 배달 에러" }
@@ -113,28 +112,28 @@ class ConversationController(
     }
 
     /**
-     * 특정 대화 스레드에 AgentCommand(질문, A2UI 액션 등)를 제출합니다. (POST /api/conversations/{conversationId}/commands)
+     * 특정 대화 스레드에 1개 턴(Run) 실행 요청(질문, A2UI 액션 등)을 제출합니다. (POST /api/conversations/{conversationId}/runs)
      */
-    @PostMapping("/{conversationId}/commands")
-    fun postCommand(
+    @PostMapping("/{conversationId}/runs")
+    fun postRun(
         @PathVariable conversationId: String,
-        @RequestBody commandRequest: AgentCommand
-    ): ResponseEntity<AgentCommandResponse> {
+        @RequestBody runRequest: AgentRunRequest
+    ): ResponseEntity<AgentRunResponse> {
         val validConvId = conversationHistoryStore.getOrCreateConversation(
             conversationId,
-            commandRequest.payload["query"] as? String
+            runRequest.payload["query"] as? String
         )
 
-        val fullCommand = commandRequest.copy(conversationId = validConvId)
-        logger.info { "AgentCommand 수신: conversationId=$validConvId, connectionId=${fullCommand.connectionId}, type=${fullCommand.type}" }
+        val fullRunRequest = runRequest.copy(conversationId = validConvId)
+        logger.info { "AgentRunRequest 수신: conversationId=$validConvId, runId=${fullRunRequest.runId}, connectionId=${fullRunRequest.connectionId}, type=${fullRunRequest.type}" }
 
-        val assignedCommandId = streamService.submitCommand(fullCommand)
+        val assignedRunId = streamService.submitRun(fullRunRequest)
 
-        val response = AgentCommandResponse(
+        val response = AgentRunResponse(
             status = "ACCEPTED",
             conversationId = validConvId,
-            commandId = assignedCommandId,
-            message = "AgentCommand queued successfully"
+            runId = assignedRunId,
+            message = "Agent Run queued successfully"
         )
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response)
     }

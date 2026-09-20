@@ -20,13 +20,13 @@ import org.springframework.kafka.core.KafkaTemplate
 import reactor.core.publisher.Mono
 
 /**
- * Kotest BehaviorSpec BDD 스타일로 작성된 ADR 0003 노드별 Redis Streams 라우팅 및 컨슈머 동적 연결 위치 조회 통합 테스트입니다.
+ * Kotest BehaviorSpec BDD 스타일로 작성된 노드별 Redis Streams 라우팅 및 컨슈머 동적 연결 위치 조회 통합 테스트입니다.
  */
 class MultiNodeDynamicRoutingIntegrationTest : BehaviorSpec({
 
     val objectMapper: ObjectMapper = jacksonObjectMapper()
 
-    given("ADR 0003: L4 라운드로빈 로드밸런서 환경에서 Node 1(소켓 보유)과 Node 2(명령 유입/이벤트 소비)가 존재할 때") {
+    given("L4 라운드로빈 로드밸런서 환경에서 Node 1(소켓 보유)과 Node 2(명령 유입/이벤트 소비)가 존재할 때") {
 
         val node1HostId = "kotlin-node-1"
         val node1SessionRegistry = SessionRegistry()
@@ -57,7 +57,7 @@ class MultiNodeDynamicRoutingIntegrationTest : BehaviorSpec({
                     val channel = node1SessionRegistry.getChannel(targetConnectionId)
                     if (channel != null) {
                         val sseEvent = ServerSentEvent.builder<String>()
-                            .id(event.eventId)
+                            .id(event.sseEventId)
                             .event(event.type)
                             .data(objectMapper.writeValueAsString(event))
                             .build()
@@ -80,24 +80,25 @@ class MultiNodeDynamicRoutingIntegrationTest : BehaviorSpec({
 
         `when`("Node 1에 사용자의 SSE 소켓(connectionId: conn-user-999)이 연결되어 있을 때") {
             val userConnectionId = "conn-user-999"
-            val userCommandId = "cmd-user-111"
+            val userRunId = "run-user-111"
             val userSseChannel = Channel<ServerSentEvent<String>>(10)
 
             node1SessionRegistry.register(userConnectionId, userSseChannel)
 
-            given(mockRedisConnectionRegistry.getConnectionByCommand(userCommandId))
+            given(mockRedisConnectionRegistry.getConnectionByRun(userRunId))
                 .willReturn(Mono.just(userConnectionId))
             given(mockRedisConnectionRegistry.getConnectionHost(userConnectionId))
                 .willReturn(Mono.just(node1HostId))
 
-            `when`("Node 2가 Kafka에서 해당 커맨드의 이벤트를 수신하면") {
+            `when`("Node 2가 Kafka에서 해당 턴(Run)의 이벤트를 수신하면") {
                 val incomingEvent = AgentEvent(
-                    eventId = "evt-test-100",
-                    commandId = userCommandId,
+                    sseEventId = "evt-test-100",
+                    runId = userRunId,
+                    messageId = "msg-report-1",
                     conversationId = "conv-test-999",
                     hostId = node2HostId,
                     type = "CHUNK",
-                    content = "ADR 0003 Redis Streams 무유실 토큰 데이터",
+                    content = "Redis Streams 무유실 토큰 데이터",
                     metadata = mapOf("step" to "report_generation")
                 )
 
@@ -114,7 +115,7 @@ class MultiNodeDynamicRoutingIntegrationTest : BehaviorSpec({
                     receivedSse shouldNotBe null
                     receivedSse?.id() shouldBe "evt-test-100"
                     receivedSse?.event() shouldBe "CHUNK"
-                    receivedSse?.data()!!.contains("ADR 0003 Redis Streams 무유실 토큰 데이터") shouldBe true
+                    receivedSse?.data()!!.contains("Redis Streams 무유실 토큰 데이터") shouldBe true
                 }
             }
         }

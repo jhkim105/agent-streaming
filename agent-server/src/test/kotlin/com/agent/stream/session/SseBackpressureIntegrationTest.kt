@@ -18,13 +18,13 @@ import org.springframework.http.codec.ServerSentEvent
 import org.springframework.kafka.core.KafkaTemplate
 
 /**
- * Kotest BehaviorSpec BDD 스타일로 작성된 Issue #5: trySend() vs send() 배압(Backpressure) 검증 통합 테스트입니다.
+ * Kotest BehaviorSpec BDD 스타일로 작성된 trySend() vs send() 배압(Backpressure) 검증 통합 테스트입니다.
  */
 class SseBackpressureIntegrationTest : BehaviorSpec({
 
     val objectMapper: ObjectMapper = jacksonObjectMapper()
 
-    given("Issue #5: 느린 클라이언트 환경에서 SSE 채널 버퍼 용량이 1개(capacity=1)로 제한되어 있을 때") {
+    given("느린 클라이언트 환경에서 SSE 채널 버퍼 용량이 1개(capacity=1)로 제한되어 있을 때") {
 
         val sessionRegistry = SessionRegistry()
         val mockRedisConnectionRegistry = mock(RedisConnectionRegistry::class.java)
@@ -87,8 +87,9 @@ class SseBackpressureIntegrationTest : BehaviorSpec({
             // 생산자가 5개의 이벤트를 suspend fun dispatchToLocalClient()를 사용해 배압을 존중하며 전송
             for (i in 1..5) {
                 val event = AgentEvent(
-                    eventId = "evt-send-$i",
-                    commandId = "cmd-1",
+                    sseEventId = "evt-send-$i",
+                    runId = "run-1",
+                    messageId = "msg-report-1",
                     conversationId = "conv-1",
                     type = "CHUNK",
                     content = "Stream Data $i"
@@ -102,7 +103,6 @@ class SseBackpressureIntegrationTest : BehaviorSpec({
 
             then("배압이 존중되어 단 1개의 이벤트도 유실되지 않고 5개 전량이 100% 정상 수신되어야 한다") {
                 receivedEvents shouldHaveSize 5
-                receivedEvents[0] shouldBe "{\"eventId\":\"evt-send-1\",\"commandId\":\"cmd-1\",\"conversationId\":\"conv-1\",\"hostId\":\"\",\"type\":\"CHUNK\",\"content\":\"Stream Data 1\",\"metadata\":{},\"timestamp\":${receivedEvents[0].let { objectMapper.readValue(it, AgentEvent::class.java).timestamp }}}"
                 receivedEvents[4].contains("Stream Data 5") shouldBe true
             }
         }

@@ -1,7 +1,7 @@
 package com.agent.stream.service
 
-import com.agent.stream.dto.AgentCommand
 import com.agent.stream.dto.AgentEvent
+import com.agent.stream.dto.AgentRunRequest
 import com.agent.stream.session.RedisConnectionRegistry
 import com.agent.stream.session.SessionRegistry
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -26,44 +26,45 @@ class StreamService(
     private val hostId: String,
     private val objectMapper: ObjectMapper
 ) {
-    @Value("\${app.kafka.topic-commands:agent-commands}")
-    private lateinit var topicCommands: String
+    @Value("\${app.kafka.topic-runs:agent-runs}")
+    private lateinit var topicRuns: String
 
     private val serviceScope = CoroutineScope(Dispatchers.Default)
 
     /**
-     * AgentCommand를 등록하고 Redis에 commandId -> connectionId 매핑 저장 후 카프카 커맨드 토픽으로 전송합니다.
+     * AgentRunRequest를 등록하고 Redis에 runId -> connectionId 매핑 저장 후 Kafka 턴 요청 토픽으로 전송합니다.
      */
-    fun submitCommand(command: AgentCommand): String {
+    fun submitRun(runRequest: AgentRunRequest): String {
         val validConvId = conversationHistoryStore.getOrCreateConversation(
-            command.conversationId,
-            command.payload["query"] as? String
+            runRequest.conversationId,
+            runRequest.payload["query"] as? String,
+            runRequest.runId
         )
 
-        val finalCommand = command.copy(
+        val finalRunRequest = runRequest.copy(
             conversationId = validConvId,
             timestamp = System.currentTimeMillis()
         )
 
-        if (finalCommand.connectionId.isNotBlank()) {
-            redisConnectionRegistry.registerCommandConnection(finalCommand.commandId, finalCommand.connectionId).subscribe()
+        if (finalRunRequest.connectionId.isNotBlank()) {
+            redisConnectionRegistry.registerRunConnection(finalRunRequest.runId, finalRunRequest.connectionId).subscribe()
         }
 
         val payloadMap = mapOf(
-            "commandId" to finalCommand.commandId,
-            "conversationId" to finalCommand.conversationId,
-            "connectionId" to finalCommand.connectionId,
+            "runId" to finalRunRequest.runId,
+            "conversationId" to finalRunRequest.conversationId,
+            "connectionId" to finalRunRequest.connectionId,
             "hostId" to hostId,
-            "type" to finalCommand.type,
-            "payload" to finalCommand.payload,
-            "timestamp" to finalCommand.timestamp
+            "type" to finalRunRequest.type,
+            "payload" to finalRunRequest.payload,
+            "timestamp" to finalRunRequest.timestamp
         )
         val jsonPayload = objectMapper.writeValueAsString(payloadMap)
 
-        logger.info { "Kafka 커맨드 토픽 전송 ($topicCommands): commandId=${finalCommand.commandId}, conversationId=$validConvId, connectionId=${finalCommand.connectionId}" }
-        kafkaTemplate.send(topicCommands, finalCommand.commandId, jsonPayload)
+        logger.info { "Kafka 턴 요청 토픽 전송 ($topicRuns): runId=${finalRunRequest.runId}, conversationId=$validConvId, connectionId=${finalRunRequest.connectionId}" }
+        kafkaTemplate.send(topicRuns, finalRunRequest.runId, jsonPayload)
 
-        return finalCommand.commandId
+        return finalRunRequest.runId
     }
 
     /**
@@ -74,19 +75,19 @@ class StreamService(
         // 1. 대화 이력 저장소에 실시간 이벤트 축적
         conversationHistoryStore.appendEvent(event)
 
-        // 2. commandId로 connectionId 동적 조회
-        redisConnectionRegistry.getConnectionByCommand(event.commandId)
+        // 2. runId로 connectionId 동적 조회
+        redisConnectionRegistry.getConnectionByRun(event.runId)
             .defaultIfEmpty("")
             .flatMap { targetConnectionId ->
                 if (targetConnectionId.isBlank()) {
-                    logger.debug { "commandId에 매핑된 connectionId 없음: commandId=${event.commandId}" }
+                    logger.debug { "runId에 매핑된 connectionId 없음: runId=${event.runId}" }
                     serviceScope.launch { dispatchToLocalClient(event, "") }
                     return@flatMap reactor.core.publisher.Mono.empty<Void>()
                 }
 
                 // 3. 로컬 노드 SessionRegistry에 해당 connectionId 소켓이 이미 존속하는지 1순위 검사 (hasSession)
                 if (sessionRegistry.hasSession(targetConnectionId)) {
-                    logger.debug { "로컬 노드 소켓 1순위 직통 배달 (hostId=$hostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
+                    logger.debug { "로컬 노드 소켓 1순위 직통 배달 (hostId=$hostId): runId=${event.runId}, connectionId=$targetConnectionId" }
                     serviceScope.launch { dispatchToLocalClient(event, targetConnectionId) }
                     return@flatMap reactor.core.publisher.Mono.empty<Void>()
                 }
@@ -98,14 +99,14 @@ class StreamService(
                         if (targetHostId == hostId) {
                             serviceScope.launch { dispatchToLocalClient(event, targetConnectionId) }
                         } else {
-                            logger.info { "타 노드 소켓 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): commandId=${event.commandId}, connectionId=$targetConnectionId" }
+                            logger.info { "타 노드 소켓 감지 ➔ Redis Streams XADD 릴레이 (본인=$hostId, 타겟=$targetHostId): runId=${event.runId}, connectionId=$targetConnectionId" }
                             redisStreamRoutingService.publishToTargetStream(targetHostId, targetConnectionId, event).subscribe()
                         }
                     }
                     .then()
             }
             .subscribe({}, { err ->
-                logger.error(err) { "동적 연결 위치 조회 중 오류 발생: commandId=${event.commandId}" }
+                logger.error(err) { "동적 연결 위치 조회 중 오류 발생: runId=${event.runId}" }
             })
     }
 
@@ -116,14 +117,14 @@ class StreamService(
         val channel = sessionRegistry.getChannel(connectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
-                .id(event.eventId)
+                .id(event.sseEventId)
                 .event(event.type)
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
             try {
                 channel.send(sseEvent)
-                logger.debug { "Client SSE 배달 성공 (send 배압 보장): type=${event.type}, connectionId=$connectionId" }
+                logger.debug { "Client SSE 배달 성공 (send 배압 보장): type=${event.type}, sseEventId=${event.sseEventId}, connectionId=$connectionId" }
             } catch (e: Exception) {
                 logger.warn(e) { "Client SSE 배달 실패 (Channel closed): connectionId=$connectionId" }
             }

@@ -22,7 +22,7 @@ import java.time.Duration
 private val logger = KotlinLogging.logger {}
 
 /**
- * ADR 0003: 노드별 레디스 스트림(stream:host:{hostId})을 활용한 무유실 라우팅 및 릴레이 서비스입니다.
+ * 노드별 레디스 스트림(stream:host:{hostId})을 활용한 무유실 라우팅 및 릴레이 서비스입니다.
  */
 @Service
 class RedisStreamRoutingService(
@@ -41,7 +41,7 @@ class RedisStreamRoutingService(
     @PostConstruct
     fun initStreamListener() {
         val myStreamKey = "$streamKeyPrefix$hostId"
-        logger.info { "노드전용 Redis Stream 리스너 기동 (ADR 0003): streamKey=$myStreamKey (Host ID=$hostId)" }
+        logger.info { "노드전용 Redis Stream 리스너 기동: streamKey=$myStreamKey (Host ID=$hostId)" }
 
         val streamOffset = StreamOffset.create(myStreamKey, ReadOffset.latest())
 
@@ -85,10 +85,10 @@ class RedisStreamRoutingService(
         val body = mapOf(
             "payload" to eventJson,
             "targetConnectionId" to targetConnectionId,
-            "commandId" to event.commandId
+            "runId" to event.runId
         )
 
-        logger.info { "Redis Stream XADD 릴레이 (ADR 0003): targetStreamKey=$targetStreamKey, type=${event.type}, targetConnectionId=$targetConnectionId" }
+        logger.info { "Redis Stream XADD 릴레이: targetStreamKey=$targetStreamKey, type=${event.type}, targetConnectionId=$targetConnectionId, runId=${event.runId}" }
         return redisTemplate.opsForStream<String, String>()
             .add(targetStreamKey, body)
             .map { recordId -> recordId.value }
@@ -112,21 +112,20 @@ class RedisStreamRoutingService(
     }
 
     /**
-     * local SSE SendChannel 세션에 이벤트를 전송하며, eventId를 W3C SSE id로 전송합니다. (Issue #5: send() 배압 보장)
+     * local SSE SendChannel 세션에 이벤트를 전송하며, sseEventId를 W3C SSE id로 전송합니다.
      */
     open suspend fun dispatchToLocalClient(event: AgentEvent, targetConnectionId: String, streamRecordId: String) {
         val channel = sessionRegistry.getChannel(targetConnectionId)
         if (channel != null) {
             val sseEvent = ServerSentEvent.builder<String>()
-                .id(event.eventId.ifBlank { streamRecordId })
+                .id(event.sseEventId.ifBlank { streamRecordId })
                 .event(event.type)
                 .data(objectMapper.writeValueAsString(event))
                 .build()
 
             try {
-                // Issue #5: trySend 대신 send()로 배압 지원
                 channel.send(sseEvent)
-                logger.debug { "Client SSE 배달 성공 (Event ID=${event.eventId}): type=${event.type}, connectionId=$targetConnectionId" }
+                logger.debug { "Client SSE 배달 성공 (Event ID=${event.sseEventId}): type=${event.type}, connectionId=$targetConnectionId" }
             } catch (e: Exception) {
                 logger.warn(e) { "Client SSE 배달 실패 (Channel closed): connectionId=$targetConnectionId" }
             }

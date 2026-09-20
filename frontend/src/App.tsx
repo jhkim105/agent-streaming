@@ -12,9 +12,7 @@ export function App() {
     connectionId,
     conversationId,
     connectionStatus,
-    statusLogs,
-    reportMarkdown,
-    a2uiData,
+    turns,
     isResearching,
     errorMsg,
     conversations,
@@ -83,9 +81,7 @@ export function App() {
 
         {/* 3. Middle Main Chat Thread Stream Window */}
         <ChatThreadWindow
-          statusLogs={statusLogs}
-          reportMarkdown={reportMarkdown}
-          a2uiData={a2uiData}
+          turns={turns}
           isResearching={isResearching}
           onSelectPrompt={(prompt) => submitQuery(prompt)}
           onActionSelect={sendUserAction}

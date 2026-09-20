@@ -98,7 +98,7 @@ export const DebugPacketInspector: React.FC<DebugPacketInspectorProps> = ({ logs
           filteredLogs.map((pkt) => (
             <div key={`${pkt.count}-${pkt.timestamp}`} className={`debug-card ${pkt.type}`}>
               <div className="debug-card-header">
-                <span>#{pkt.count} | <strong>{pkt.type}</strong> | ID: {pkt.eventId}</span>
+                <span>#{pkt.count} | <strong>{pkt.type}</strong> | ID: {pkt.sseEventId}</span>
                 <span>⏱️ {pkt.timestamp}</span>
               </div>
               <div className="debug-raw-text">{pkt.rawData}</div>

@@ -16,7 +16,7 @@ class AgentState(TypedDict):
     """
     LangGraph 대화 흐름 속에서 노드 간에 공유되는 Agent Runtime 상태 클래스입니다.
     """
-    command_id: str                      # 사용자 커맨드 식별자 (commandId)
+    run_id: str                          # 사용자 1회 턴(Run) 식별자 (runId)
     conversation_id: str                 # 대화 스레드 식별자 (conversationId)
     host_id: str                         # 타겟 게이트웨이 노드 ID (hostId)
     query: str                           # 사용자 질문 원본 텍스트
@@ -37,12 +37,17 @@ class AgentRuntimeEngine:
         self.graph = self._build_graph()
 
     def _build_graph(self) -> Any:
+        # LangGraph StateGraph 인스턴스를 생성합니다.
         builder = StateGraph(AgentState)
 
+        # 1. 의도 분석 노드
         builder.add_node("intent_detection", self._node_intent_detection)
+        # 2. 웹 검색 노드
         builder.add_node("conditional_search", self._node_conditional_search)
+        # 3. 답변 생성 및 스트리밍 노드
         builder.add_node("generate_response", self._node_generate_response)
 
+        # 노드 간 실행 순서 엣지를 연결합니다.
         builder.set_entry_point("intent_detection")
         builder.add_edge("intent_detection", "conditional_search")
         builder.add_edge("conditional_search", "generate_response")
@@ -52,9 +57,9 @@ class AgentRuntimeEngine:
 
     def _node_intent_detection(self, state: AgentState) -> Dict[str, Any]:
         """
-        [1단계 노드] 사용자의 질문을 분석하여 실시간 외부 정보 탐색(주가, 날씨, 뉴스 등)이 필요한지 감지합니다.
+        [1단계 노드] 사용자의 질문을 분석하여 실시간 외부 정보 탐색이 필요한지 감지합니다.
         """
-        command_id = state["command_id"]
+        run_id = state["run_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -68,14 +73,15 @@ class AgentRuntimeEngine:
         needs_search = any(kw in query_lower for kw in search_triggers)
 
         if needs_search:
-            status_msg = f"💭 질문 분석 완료: 실시간 외부 정보 탐색(웹검색)이 필요한 질문입니다."
+            status_msg = "💭 질문 분석 완료: 실시간 외부 정보 탐색(웹검색)이 필요한 질문입니다."
         else:
-            status_msg = f"💭 질문 분석 완료: 로컬 LLM 지식 기반 답변 생성 단계로 진입합니다."
+            status_msg = "💭 질문 분석 완료: 로컬 LLM 지식 기반 답변 생성 단계로 진입합니다."
 
         self.producer.send_event(
-            command_id=command_id,
+            run_id=run_id,
             conversation_id=conversation_id,
             host_id=host_id,
+            message_id="msg-think-1",
             event_type="STATUS",
             content=status_msg,
             step="intent_detection"
@@ -87,7 +93,7 @@ class AgentRuntimeEngine:
         """
         [2단계 노드] 실시간 탐색이 필요한 경우에만 웹 검색 도구를 조건부 구동합니다.
         """
-        command_id = state["command_id"]
+        run_id = state["run_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -97,9 +103,10 @@ class AgentRuntimeEngine:
 
         if needs_search:
             self.producer.send_event(
-                command_id=command_id,
+                run_id=run_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
+                message_id="msg-think-1",
                 event_type="STATUS",
                 content=f"🌐 실시간 정보 탐색 중 (DuckDuckGo Search: '{query}')",
                 step="conditional_search"
@@ -108,9 +115,10 @@ class AgentRuntimeEngine:
             search_results = search_web_duckduckgo(query=query, max_results=3)
 
             self.producer.send_event(
-                command_id=command_id,
+                run_id=run_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
+                message_id="msg-think-1",
                 event_type="STATUS",
                 content=f"✅ 실시간 수집 결과 {len(search_results)}건 수집 완료",
                 step="conditional_search"
@@ -122,7 +130,7 @@ class AgentRuntimeEngine:
         """
         [3단계 노드] 사용자의 질문을 종합하여 Ollama LLM을 통해 자연스러운 답변을 고속 스트리밍 송신합니다.
         """
-        command_id = state["command_id"]
+        run_id = state["run_id"]
         conversation_id = state.get("conversation_id", "")
         host_id = state["host_id"]
         query = state["query"]
@@ -142,9 +150,10 @@ class AgentRuntimeEngine:
             context_str = "\n".join(context_blocks)
 
         self.producer.send_event(
-            command_id=command_id,
+            run_id=run_id,
             conversation_id=conversation_id,
             host_id=host_id,
+            message_id="msg-think-1",
             event_type="STATUS",
             content=f"🧠 [Ollama {OLLAMA_MODEL}] 답변 고속 스트리밍 생성 중",
             step="generate_response"
@@ -153,7 +162,7 @@ class AgentRuntimeEngine:
         # 1. Ollama LLM 자연어 토큰 미세 버퍼 고속 스트리밍
         if is_ollama_online:
             if context_str:
-                system_prompt = f"""너는 유능하고 친절한 범용 AI 지능형 에이전트(AI Assistant)이다.
+                system_prompt = """너는 유능하고 친절한 범용 AI 지능형 에이전트(AI Assistant)이다.
 제공된 [실시간 검색 자료]를 참고하여 사용자의 질문에 친절하고 명확하게 한국어로 답변하라.
 출처 번호를 억지로 표기하지 말고, 자연스러운 마크다운 문맥 속에 정보를 녹여서 답변할 것."""
 
@@ -183,9 +192,10 @@ class AgentRuntimeEngine:
 
                 if len(buffer_chunk) >= 3 or "\n" in buffer_chunk:
                     self.producer.send_event(
-                        command_id=command_id,
+                        run_id=run_id,
                         conversation_id=conversation_id,
                         host_id=host_id,
+                        message_id="msg-report-1",
                         event_type="CHUNK",
                         content=buffer_chunk,
                         step="streaming"
@@ -194,15 +204,16 @@ class AgentRuntimeEngine:
 
             if buffer_chunk:
                 self.producer.send_event(
-                    command_id=command_id,
+                    run_id=run_id,
                     conversation_id=conversation_id,
                     host_id=host_id,
+                    message_id="msg-report-1",
                     event_type="CHUNK",
                     content=buffer_chunk,
                     step="streaming"
                 )
 
-        # 2. Fallback
+        # 2. Fallback (LLM 오프라인 시)
         else:
             fallback = f"안녕하세요! 질문 **'{query}'**에 대한 안내입니다.\n\n"
             if search_results:
@@ -212,9 +223,10 @@ class AgentRuntimeEngine:
 
             full_text = fallback
             self.producer.send_event(
-                command_id=command_id,
+                run_id=run_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
+                message_id="msg-report-1",
                 event_type="CHUNK",
                 content=fallback,
                 step="streaming"
@@ -228,9 +240,10 @@ class AgentRuntimeEngine:
 
         # 4. 완결 DONE 신호 송신
         self.producer.send_event(
-            command_id=command_id,
+            run_id=run_id,
             conversation_id=conversation_id,
             host_id=host_id,
+            message_id="msg-done",
             event_type="DONE",
             content="Response Completed",
             title=smart_title,
@@ -242,12 +255,12 @@ class AgentRuntimeEngine:
             "smart_title": smart_title
         }
 
-    def execute(self, command_id: str, host_id: str, query: str, conversation_id: str = "") -> None:
+    def execute(self, run_id: str, host_id: str, query: str, conversation_id: str = "") -> None:
         """
         Agent Runtime 추론 파이프라인 메인 실행 함수입니다.
         """
         initial_state: AgentState = {
-            "command_id": command_id,
+            "run_id": run_id,
             "conversation_id": conversation_id,
             "host_id": host_id,
             "query": query,
@@ -262,9 +275,10 @@ class AgentRuntimeEngine:
         except Exception as e:
             print(f"[AgentRuntime ERROR] 파이프라인 실행 예외 발생: {e}")
             self.producer.send_event(
-                command_id=command_id,
+                run_id=run_id,
                 conversation_id=conversation_id,
                 host_id=host_id,
+                message_id="msg-error",
                 event_type="ERROR",
                 content=f"AgentRuntime 처리 중 오류가 발생했습니다: {str(e)}",
                 step="error"

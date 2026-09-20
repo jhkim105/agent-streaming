@@ -57,7 +57,7 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
                     val channel = node1SessionRegistry.getChannel(targetConnectionId)
                     if (channel != null) {
                         val sseEvent = ServerSentEvent.builder<String>()
-                            .id(event.eventId)
+                            .id(event.sseEventId)
                             .event(event.type)
                             .data(objectMapper.writeValueAsString(event))
                             .build()
@@ -80,20 +80,21 @@ class MultiNodeRoutingIntegrationTest : BehaviorSpec({
 
         `when`("Node 1에 사용자의 SSE 소켓(connectionId: test-user-conn-100)이 등록되어 있을 때") {
             val userConnectionId = "test-user-conn-100"
-            val userCommandId = "cmd-test-200"
+            val userRunId = "run-test-200"
             val userSseChannel = Channel<ServerSentEvent<String>>(10)
 
             node1SessionRegistry.register(userConnectionId, userSseChannel)
 
-            given(mockRedisConnectionRegistry.getConnectionByCommand(userCommandId))
+            given(mockRedisConnectionRegistry.getConnectionByRun(userRunId))
                 .willReturn(Mono.just(userConnectionId))
             given(mockRedisConnectionRegistry.getConnectionHost(userConnectionId))
                 .willReturn(Mono.just(node1HostId))
 
-            `when`("Node 2가 Kafka에서 해당 커맨드의 이벤트를 수신하면") {
+            `when`("Node 2가 Kafka에서 해당 턴(Run)의 이벤트를 수신하면") {
                 val incomingEvent = AgentEvent(
-                    eventId = "evt-test-123",
-                    commandId = userCommandId,
+                    sseEventId = "evt-test-123",
+                    runId = userRunId,
+                    messageId = "msg-report-1",
                     conversationId = "conv-test-123",
                     hostId = node1HostId,
                     type = "CHUNK",

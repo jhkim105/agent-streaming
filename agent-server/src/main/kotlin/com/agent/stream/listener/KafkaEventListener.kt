@@ -25,7 +25,7 @@ class KafkaEventListener(
     fun onMessage(message: String) {
         try {
             val event = objectMapper.readValue(message, AgentEvent::class.java)
-            logger.debug { "Kafka AgentEvent 수신: type=${event.type}, commandId=${event.commandId}, eventId=${event.eventId}" }
+            logger.debug { "Kafka AgentEvent 수신: type=${event.type}, runId=${event.runId}, sseEventId=${event.sseEventId}, messageId=${event.messageId}" }
 
             // 분산 이벤트 라우팅 핸들러로 전달
             streamService.handleAgentEvent(event)

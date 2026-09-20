@@ -13,8 +13,8 @@ private val logger = KotlinLogging.logger {}
 @Configuration
 class AgentStreamConfig {
 
-    @Value("\${app.kafka.topic-commands:agent-commands}")
-    private lateinit var topicCommands: String
+    @Value("\${app.kafka.topic-runs:agent-runs}")
+    private lateinit var topicRuns: String
 
     @Value("\${app.kafka.topic-events:agent-events}")
     private lateinit var topicEvents: String
@@ -30,12 +30,12 @@ class AgentStreamConfig {
     }
 
     /**
-     * Kafka agent-commands 토픽을 자동 생성합니다.
+     * Kafka agent-runs 토픽을 자동 생성합니다.
      */
     @Bean
-    fun topicCommands(): NewTopic {
-        logger.info { "Kafka 토픽 생성/확인: $topicCommands" }
-        return TopicBuilder.name(topicCommands)
+    fun topicRuns(): NewTopic {
+        logger.info { "Kafka 토픽 생성/확인: $topicRuns" }
+        return TopicBuilder.name(topicRuns)
             .partitions(3)
             .replicas(1)
             .build()

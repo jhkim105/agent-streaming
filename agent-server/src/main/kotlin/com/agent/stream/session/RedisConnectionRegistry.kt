@@ -11,14 +11,14 @@ private val logger = KotlinLogging.logger {}
 /**
  * Redis 기반 분산 연결 레지스트리 서비스입니다.
  * - connection:host:{connectionId} ➔ hostId (소켓 보유 노드)
- * - command:connection:{commandId} ➔ connectionId (명령 발송 소켓)
+ * - run:connection:{runId} ➔ connectionId (턴 요청 발송 소켓)
  */
 @Service
 class RedisConnectionRegistry(
     private val redisTemplate: ReactiveStringRedisTemplate
 ) {
     private val connectionKeyPrefix = "connection:host:"
-    private val commandKeyPrefix = "command:connection:"
+    private val runKeyPrefix = "run:connection:"
 
     /**
      * SSE 연결 수립 시 해당 connectionId가 어느 hostId 노드에 맺어졌는지 Redis에 동적 등록합니다.
@@ -48,20 +48,20 @@ class RedisConnectionRegistry(
     }
 
     /**
-     * AgentCommand 수신 시 commandId와 해당 요청을 전송한 connectionId 매핑을 Redis에 등록합니다.
+     * AgentRunRequest 수신 시 runId와 해당 요청을 전송한 connectionId 매핑을 Redis에 등록합니다.
      */
-    fun registerCommandConnection(commandId: String, connectionId: String): Mono<Boolean> {
-        val key = "$commandKeyPrefix$commandId"
-        logger.info { "Redis Command-Connection 매핑 등록: commandId=$commandId -> connectionId=$connectionId" }
+    fun registerRunConnection(runId: String, connectionId: String): Mono<Boolean> {
+        val key = "$runKeyPrefix$runId"
+        logger.info { "Redis Run-Connection 매핑 등록: runId=$runId -> connectionId=$connectionId" }
         return redisTemplate.opsForValue()
             .set(key, connectionId, Duration.ofHours(1))
     }
 
     /**
-     * commandId로 해당 AgentCommand를 보낸 connectionId를 조회합니다.
+     * runId로 해당 턴 요청을 보낸 connectionId를 조회합니다.
      */
-    fun getConnectionByCommand(commandId: String): Mono<String> {
-        val key = "$commandKeyPrefix$commandId"
+    fun getConnectionByRun(runId: String): Mono<String> {
+        val key = "$runKeyPrefix$runId"
         return redisTemplate.opsForValue().get(key)
     }
 }

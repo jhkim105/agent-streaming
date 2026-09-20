@@ -73,3 +73,7 @@ gradle-app.setting
 /tmp/
 scratch/
 *.log
+docs/tasks/
+tasks/
+**/checklists/
+checklists/

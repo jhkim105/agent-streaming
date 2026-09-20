@@ -23,7 +23,5 @@ spring:
 
 app:
   kafka:
-    topic-commands: agent-commands
-    topic-events: agent-events
-    topic-requests: agent-commands
-    topic-responses: agent-events
+    topic-runs: ${KAFKA_TOPIC_RUNS:agent-runs}
+    topic-events: ${KAFKA_TOPIC_EVENTS:agent-events}

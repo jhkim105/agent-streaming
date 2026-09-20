@@ -57,8 +57,8 @@ services:
       kafka-topics --bootstrap-server kafka:29092 --list
 
       echo -e 'Creating agent-streaming kafka topics...'
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-requests --replication-factor 1 --partitions 3
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-responses --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-runs --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic agent-events --replication-factor 1 --partitions 3
       
       echo -e 'Successfully created topics:'
       kafka-topics --bootstrap-server kafka:29092 --list
